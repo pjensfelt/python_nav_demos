@@ -1,0 +1,11 @@
+{
+  "name": "narrow passage",
+  "comment": "The door is 0.8 m wide: 0.4 m free after inflating by the robot radius 0.2 m. Coarse or conservative cells close it; the way round is long.",
+  "bounds": [0, 10, 0, 10],
+  "start": [1, 2, 0],
+  "goal": [9, 2],
+  "obstacles": [
+    {"type": "wall", "from": [5, 0], "to": [5, 3.6], "thickness": 0.2},
+    {"type": "wall", "from": [5, 4.4], "to": [5, 9.0], "thickness": 0.2}
+  ]
+}

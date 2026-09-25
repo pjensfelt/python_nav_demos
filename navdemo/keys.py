@@ -29,6 +29,8 @@ HELP = """
  d      disturb robot   S  screenshot (2 pngs)  >     increase selected
  c      control law:                            <     decrease selected
         heading-P / pure pursuit
+ b      pure pursuit: turn in place
+        when the target is behind
  1..4   built-in path   mouse: drag in the plot to draw a new path
  w      save the path   (the robot restarts at its first point)
         to paths/
@@ -74,6 +76,8 @@ def make_handler(state: DemoState, fig=None, ax=None, demo="purepursuit"):
         elif k == "c":
             i = (CONTROL_LAWS.index(state.law) + 1) % len(CONTROL_LAWS)
             state.law = CONTROL_LAWS[i]
+        elif k == "b":
+            state.turnInPlace = not state.turnInPlace
         elif k in "1234":
             state.newPath = int(k) - 1
         elif k == "w":

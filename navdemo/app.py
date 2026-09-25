@@ -50,6 +50,8 @@ def common_args(description):
                     help="robot's starting heading [deg]; it always starts at the path's first point")
     ap.add_argument("--law", choices=["heading-P", "pure-pursuit"], default="heading-P",
                     help="control law to start with ('c' toggles)")
+    ap.add_argument("--turn-in-place", action="store_true",
+                    help="pure pursuit law: turn on the spot when the target is behind ('b' toggles)")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                     help="preset a tunable, e.g. --set lookahead=0.3 --set accw=360 "
                          "(angles in degrees, 'inf' for unlimited/off). Names: "

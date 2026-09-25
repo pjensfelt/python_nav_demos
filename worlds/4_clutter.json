@@ -1,0 +1,22 @@
+{
+  "name": "clutter",
+  "comment": "Scattered circles and boxes: many homotopy classes, so RRT paths differ a lot from run to run.",
+  "bounds": [0, 10, 0, 10],
+  "start": [0.8, 0.8, 45],
+  "goal": [9.2, 9.2],
+  "obstacles": [
+    {"type": "circle", "center": [2.5, 2.2], "radius": 0.7},
+    {"type": "circle", "center": [5.0, 1.5], "radius": 0.5},
+    {"type": "circle", "center": [4.2, 4.5], "radius": 0.9},
+    {"type": "circle", "center": [7.5, 3.0], "radius": 0.6},
+    {"type": "circle", "center": [2.0, 6.5], "radius": 0.6},
+    {"type": "circle", "center": [6.5, 6.0], "radius": 0.7},
+    {"type": "circle", "center": [8.5, 7.0], "radius": 0.4},
+    {"type": "circle", "center": [4.5, 8.3], "radius": 0.6},
+    {"type": "box", "center": [6.0, 3.8], "size": [1.2, 0.4], "angle": 30},
+    {"type": "box", "center": [3.0, 8.5], "size": [0.4, 1.4], "angle": -20},
+    {"type": "box", "center": [8.0, 5.0], "size": [1.5, 0.3], "angle": -45},
+    {"type": "box", "center": [1.2, 4.3], "size": [1.0, 1.0], "angle": 15},
+    {"type": "polygon", "points": [[6.5, 8.0], [8.0, 8.4], [7.2, 9.4]]}
+  ]
+}

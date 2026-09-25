@@ -1,0 +1,11 @@
+{
+  "name": "thin walls",
+  "comment": "5 cm walls. With center sampling and 1 m cells (or 0.5 m cells and 0.2 m inflation) no cell centre is close enough to them, so they vanish from the grid -- and the robot drives into them.",
+  "bounds": [0, 10, 0, 10],
+  "start": [1, 1, 90],
+  "goal": [9, 9],
+  "obstacles": [
+    {"type": "wall", "from": [3, 0], "to": [3, 8], "thickness": 0.05},
+    {"type": "wall", "from": [7, 2], "to": [7, 10], "thickness": 0.05}
+  ]
+}

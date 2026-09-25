@@ -31,6 +31,7 @@ def main():
 
     state = DemoState()
     app.apply_common_args(state, args)
+    state.turnInPlace = args.turn_in_place
     paths = builtin_paths()
     theta0 = np.deg2rad(args.theta0)
 
@@ -105,8 +106,10 @@ def main():
 
     if args.headless or args.snapshot:
         if follower.done:
+            miss = np.hypot(*(np.array(follower.robot.pose[:2]) - path.xy[-1]))
             print(f"Reached the end of {path.name} at t={follower.t_done:.2f}s "
-                  f"with max cross-track error {follower.max_abs_e:.3f}m")
+                  f"with max cross-track error {follower.max_abs_e:.3f}m, "
+                  f"stopped {miss:.3f}m from the goal")
         else:
             print(f"Did not reach the end of {path.name} in t={follower.t:.2f}s "
                   f"(max cross-track error {follower.max_abs_e:.3f}m)")

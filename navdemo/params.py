@@ -70,6 +70,7 @@ class DemoState:
     running: bool = True
     paused: bool = False
     law: str = CONTROL_LAWS[0]
+    turnInPlace: bool = False   # pure pursuit law: turn on the spot when the target is behind
     showGeometry: bool = True
     showTrail: bool = True
     path_idx: int = 0
@@ -110,4 +111,5 @@ class DemoState:
         """The dict Follower.advance/control expect."""
         p = {t.name: self.value(t.name) for t in TUNABLES}
         p["law"] = self.law
+        p["turn_in_place"] = self.turnInPlace
         return p

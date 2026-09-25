@@ -160,6 +160,8 @@ class Panel:
         rows += [
             "",
             f"law:    {state.law}",
+            f"turn in place: {'on' if state.turnInPlace else 'off'} (b)"
+            + ("" if state.law == "pure pursuit" else " (unused)"),
             f"path:   {f.path.name} ({f.path.length:.2f} m)",
             f"status: {status}",
             "",

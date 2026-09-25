@@ -110,6 +110,45 @@ def test_default_settings_follow_every_builtin_path():
 
 
 @test
+def test_stops_at_the_goal():
+    """The braking profile brings the robot to rest on the goal, not
+    v^2/(2 acc_v) past it (0.25 m at the defaults without it)."""
+    state = DemoState()
+    for law, ld in (("heading-P", 0.1), ("pure pursuit", 0.3)):
+        state.law = law
+        state.set_value("lookahead", ld)
+        p = state.controller_params()
+        for path in builtin_paths():
+            f = Follower(path, Robot(*path.start, 0.0))
+            while not (f.done and abs(f.robot.v) < 1e-3) and f.t < 60:
+                f.advance(0.1, p)
+            miss = np.hypot(f.robot.x - path.xy[-1, 0], f.robot.y - path.xy[-1, 1])
+            assert miss < 0.05, (law, path.name, miss)
+
+
+@test
+def test_turn_in_place_when_target_behind():
+    """Started facing backwards, plain pure pursuit crawls (w = v * kappa and
+    the slow-down makes v ~ 0); turning in place gets it going at once."""
+    state = DemoState()
+    state.law = "pure pursuit"
+    state.set_value("lookahead", 0.3)
+    path = builtin_paths()[1]
+    times = {}
+    for tip in (False, True):
+        state.turnInPlace = tip
+        p = state.controller_params()
+        f = Follower(path, Robot(*path.start, np.pi))
+        while not f.done and f.t < 80:
+            f.advance(0.1, p)
+        times[tip] = f.t
+    assert times[True] < 15 and times[False] > 3 * times[True], times
+    # it really is on the spot: no forward speed while the target is behind
+    v, w, alpha = control_pure_pursuit((0, 0, 0), (-1.0, 0.1), 1.0, np.deg2rad(60), True)
+    assert v == 0.0 and w > 0
+
+
+@test
 def test_ladders_and_set_value():
     s = DemoState()
     for t in TUNABLES:

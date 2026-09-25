@@ -79,7 +79,15 @@ def control_heading(pose, target, vMax, kP, sigma):
     return vRef, wRef, aErr
 
 
-def control_pure_pursuit(pose, target, vMax, sigma):
+# Turn in place (pure pursuit only): above this angle to the target the
+# robot stops and turns on the spot, at TURN_GAIN * alpha capped at
+# TURN_RATE_MAX, until the target is back in front.
+TURN_IN_PLACE_ANGLE = np.deg2rad(90)
+TURN_GAIN = 2.0                    # 1/s
+TURN_RATE_MAX = np.deg2rad(180)    # rad/s
+
+
+def control_pure_pursuit(pose, target, vMax, sigma, turn_in_place=False):
     """Classic (geometric) pure pursuit: drive the circular arc that leaves
     the robot tangent to its current heading and passes through the
     lookahead point.
@@ -91,11 +99,20 @@ def control_pure_pursuit(pose, target, vMax, sigma):
 
     and w = v * kappa follows it at whatever speed v we choose. There is no
     gain to tune here -- the lookahead distance *is* the gain.
+
+    The catch: w is proportional to v. When the target is behind the robot,
+    the slow-down makes v almost zero, so w is almost zero too, and the
+    robot crawls along a huge arc instead of turning round. With
+    `turn_in_place` it stops and turns on the spot instead whenever the
+    target is more than TURN_IN_PLACE_ANGLE off -- the usual practical fix.
+    (heading-P doesn't need this: its w = kP * aErr doesn't depend on v.)
     """
     x, y, a = pose
     dx, dy = target[0] - x, target[1] - y
     Ld = max(np.hypot(dx, dy), 1e-9)
     alpha = wrap_angle(np.arctan2(dy, dx) - a)
+    if turn_in_place and abs(alpha) > TURN_IN_PLACE_ANGLE:
+        return 0.0, float(np.clip(TURN_GAIN * alpha, -TURN_RATE_MAX, TURN_RATE_MAX)), alpha
     kappa = 2.0 * np.sin(alpha) / Ld
     vRef = vMax * speed_reduction(alpha, sigma)
     wRef = vRef * kappa
@@ -166,10 +183,38 @@ class Follower:
         self.target = self.path.point_at(s + p["lookahead"])
         if p["law"] == "pure pursuit":
             self.vRef, self.wRef, self.aErr = control_pure_pursuit(
-                self.robot.pose, self.target, p["vmax"], p["sigma"])
+                self.robot.pose, self.target, p["vmax"], p["sigma"],
+                p.get("turn_in_place", False))
         else:
             self.vRef, self.wRef, self.aErr = control_heading(
                 self.robot.pose, self.target, p["vmax"], p["kp"], p["sigma"])
+        self.brake_for_goal(p)
+
+    # Braking deceleration as a fraction of acc_v: below the real limit, so
+    # the robot has margin to actually follow the profile.
+    BRAKE_FRACTION = 0.5
+
+    def brake_for_goal(self, p):
+        """Brake *into* the goal instead of at it.
+
+        Only asking for v = 0 once the goal is reached (as the MATLAB demo
+        did) overshoots it by v^2 / (2 acc_v) -- 0.25 m at 1 m/s and
+        2 m/s^2. Instead the speed is capped by a braking profile,
+
+            v <= sqrt(2 * a_brake * d)      d = distance left along the path,
+
+        the speed from which braking at a_brake stops exactly at the end.
+        The robot decelerates uniformly over the last v^2 / (2 a_brake)
+        metres and comes to rest on the goal.
+        """
+        if self.vRef <= 0 or np.isinf(p["accv"]):
+            return   # with unlimited deceleration there is nothing to plan for
+        d = max(self.path.length - self.s, 0.0)
+        v_cap = np.sqrt(2 * self.BRAKE_FRACTION * p["accv"] * d)
+        if v_cap < self.vRef:
+            if p["law"] == "pure pursuit":
+                self.wRef *= v_cap / self.vRef    # the same arc, just slower
+            self.vRef = v_cap
 
     def advance(self, duration, p):
         """Simulate `duration` seconds: physics every PHYSICS_DT, the
