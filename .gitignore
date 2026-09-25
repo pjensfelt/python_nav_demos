@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# demo output
+snapshots/
+*.png
+.DS_Store
