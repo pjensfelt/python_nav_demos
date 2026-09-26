@@ -18,7 +18,8 @@ passed in on every call so parameter changes take effect immediately.
 
 import numpy as np
 
-from .grid import Grid, GridChecker, GeometryChecker
+from .grid import GridChecker, GeometryChecker, known_map
+from .rasterize import sample_outlines
 from .mapping import Lidar, MappedGrid
 from .path import Path
 from .planners import astar, rrt, rrtstar, shortcut, path_length
@@ -41,13 +42,22 @@ class Mission:
 
     # ---- the map ------------------------------------------------------------
 
-    def build_map(self, cfg):
-        """(Re)make the grid for the current settings and reset the mission."""
+    def build_map(self, cfg, samples=None):
+        """(Re)make the grid for the current settings and reset the mission.
+
+        The known map is made from `samples`, points on the obstacles'
+        outlines as an earlier survey with a sensor would have left them
+        (see grid.known_map); the demo passes them in so they stay fixed to
+        the world. Without them, a fresh set is sampled here."""
         if cfg["mapped"]:
             self.grid = MappedGrid(self.world.bounds, cfg["res"], cfg["inflate"])
             self.lidar = Lidar(cfg["sensor_range"], cfg["rays"], cfg["noise"], self.rng)
         else:
-            self.grid = Grid.from_world(self.world, cfg["res"], cfg["inflate"])
+            if samples is None:
+                samples = sample_outlines(self.world.obstacles, self.world.room, cfg["spacing"],
+                                          cfg["sample_sigma"], self.rng)
+            self.grid = known_map(self.world, samples, cfg["res"], cfg["inflate"],
+                                  int(cfg["min_hits"]))
             self.lidar = None
         self.reset()
 

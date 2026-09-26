@@ -28,10 +28,18 @@ def setup_axes(fig, title):
     return ax
 
 
-def set_world_limits(ax, world, margin=0.3):
+def set_world_limits(ax, world, margin=0.3, grow=False):
+    """Fit the view to the world. With `grow`, only ever widen it (so it
+    doesn't jump about while the world is rotated), and settle back to the
+    world as drawn when it is unrotated again."""
     xmin, xmax, ymin, ymax = world.bounds
-    ax.set_xlim(xmin - margin, xmax + margin)
-    ax.set_ylim(ymin - margin, ymax + margin)
+    lo = np.array([xmin - margin, ymin - margin])
+    hi = np.array([xmax + margin, ymax + margin])
+    if grow:
+        (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+        lo, hi = np.minimum(lo, [x0, y0]), np.maximum(hi, [x1, y1])
+    ax.set_xlim(lo[0], hi[0])
+    ax.set_ylim(lo[1], hi[1])
 
 
 class ObstacleArtist:
@@ -217,6 +225,7 @@ class ScanArtist:
 def add_legend(fig):
     handles = [
         Patch(facecolor=(0, 0, 0, 0.10), edgecolor="k", label="real obstacle"),
+        Line2D([], [], color="tab:orange", marker=".", lw=0, label="sample point (known map)"),
         Patch(facecolor=C_OBSTACLE, label="map: occupied cell"),
         Patch(facecolor=C_INFLATE, label="planning map: inflation"),
         Patch(facecolor=C_UNKNOWN, label="unknown (planned as free)"),
@@ -238,7 +247,8 @@ class Panel:
 
     def update(self, state: PlanState, mission, status):
         g = mission.grid
-        rows = [f"map:     {'mapped as we go' if state.mapped else 'known'} (k)",
+        rows = [f"map:     {'mapped as we go (lidar)' if state.mapped else 'known, from samples'} (m)",
+                f"world:   rotated {np.rad2deg(state.world_angle):+.0f}° (, . k l; 0 back)",
                 f"planner: {state.planner} (p)"]
         if state.planner == "A*":
             rows.append(f"         {'8' if state.eight else '4'}-connected (n)")

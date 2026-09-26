@@ -37,7 +37,7 @@ from collections import deque
 import numpy as np
 
 from .grid import Grid
-from .world import Circle, Outside, Polygon
+from .world import Circle, Outside, Polygon, transform_obstacles  # noqa: F401 (re-exported)
 
 RULES = ("any overlap", "samples")
 
@@ -58,27 +58,6 @@ INFLATE_ORDERS = ("world first", "grid first")
 # --------------------------------------------------------------------------
 # Moving the world
 # --------------------------------------------------------------------------
-
-def transform_obstacles(obstacles, pivot, offset, angle):
-    """The obstacles rotated by `angle` about `pivot`, then shifted by
-    `offset`."""
-    c, s = np.cos(angle), np.sin(angle)
-    R = np.array([[c, -s], [s, c]])
-    pivot, offset = np.asarray(pivot, float), np.asarray(offset, float)
-
-    def move(P):
-        return (np.atleast_2d(P) - pivot) @ R.T + pivot + offset
-
-    out = []
-    for ob in obstacles:
-        if isinstance(ob, Circle):
-            out.append(Circle(move(ob.c)[0], ob.r))
-        elif isinstance(ob, Outside):
-            out.append(Outside(move(ob.v)))
-        else:
-            out.append(Polygon(move(ob.v)))
-    return out, move
-
 
 def sample_outlines(obstacles, room, spacing, sigma=0.0, rng=None):
     """Points every `spacing` metres along each obstacle's outline and the

@@ -52,10 +52,7 @@ class Grid:
         """The pre-built map, from the real geometry: a cell is occupied if
         it overlaps an obstacle (or the room's walls) grown by `inflate`."""
         from .rasterize import rasterize, room_walls     # (rasterize imports Grid)
-        # one ring of cells round the room, so its walls show up as cells too
-        x0, x1, y0, y1 = world.bounds
-        r_ = resolution
-        bounds = (x0 - r_, x1 + r_, y0 - r_, y1 + r_)
+        bounds = lattice_extent(world, resolution)
         r = rasterize(world.obstacles + room_walls(world.room), bounds, resolution, inflate)
         g = cls(bounds, resolution, inflate)
         g.obstacle, g.occ = r.obstacle, r.occ
@@ -116,6 +113,33 @@ class Grid:
                 ty += dty
             cells.append((cx, cy))
         return cells
+
+
+def lattice_extent(world, res, ring=1):
+    """The part of the cell lattice (anchored at `world.anchor`, the room's
+    corner as drawn) that covers the world's room, plus `ring` cells round
+    it so the room's walls show up as cells too. Moving the world moves it
+    across the cells; the cells themselves stay put."""
+    ax, ay = world.anchor
+    x0, x1, y0, y1 = world.bounds
+    i0 = int(floor((x0 - ax) / res + 1e-9)) - ring
+    i1 = int(ceil((x1 - ax) / res - 1e-9)) + ring
+    j0 = int(floor((y0 - ay) / res + 1e-9)) - ring
+    j1 = int(ceil((y1 - ay) / res - 1e-9)) + ring
+    return (ax + i0 * res, ax + i1 * res, ay + j0 * res, ay + j1 * res)
+
+
+def known_map(world, samples, res, inflate, min_hits=1):
+    """The planning demo's map made up front, as a robot would have it from
+    an earlier survey with its sensor: from points on the obstacles'
+    outlines (`samples`, from rasterize.sample_outlines, moved with the
+    world), a cell occupied if at least `min_hits` land in it, inflated in
+    the grid -- there is no geometric model to inflate first. The same as
+    the grid demo's "samples" rule."""
+    from .rasterize import rasterize_samples                 # (it imports Grid)
+    g = rasterize_samples(samples, lattice_extent(world, res), res, inflate, min_hits)
+    g.known = np.ones((g.nx, g.ny), dtype=bool)
+    return g
 
 
 class GridChecker:

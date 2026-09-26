@@ -257,6 +257,58 @@ def test_turn_in_place_in_bug_trap():
 
 
 @test
+def test_rotated_world_known_map():
+    """The world turned under the grid: the gap world still works at 30
+    degrees, but the narrow passage's door closes -- rotation is where a
+    grid hurts most."""
+    from navdemo.world import moved, centre
+    gap, narrow = World.load("1_gap.json"), World.load("2_narrow.json")
+    m = _run(moved(gap, (0, 0), np.deg2rad(30), centre(gap)), _cfg())
+    assert m.done and not m.collided
+    m = _run(moved(narrow, (0, 0), np.deg2rad(45), centre(narrow)), _cfg())
+    assert not m.path
+
+
+@test
+def test_known_map_is_made_from_samples():
+    """Sparse samples leave holes, so the known map has fewer occupied cells
+    than a dense survey; noise spreads them over more."""
+    from navdemo.grid import known_map
+    from navdemo.rasterize import sample_outlines
+    w = World.load("6_rooms.json")
+    occ = {}
+    for name, spacing, sigma in (("dense", 0.02, 0.0), ("sparse", 0.5, 0.0), ("noisy", 0.02, 0.1)):
+        P = sample_outlines(w.obstacles, w.room, spacing, sigma, np.random.default_rng(0))
+        occ[name] = known_map(w, P, 0.1, 0.0).obstacle.sum()
+    assert occ["sparse"] < occ["dense"] < occ["noisy"]
+
+
+@test
+def test_planning_keys_rotate_and_restore():
+    from types import SimpleNamespace as N
+    from navdemo import plankeys
+    plankeys._MIN_REPEAT_INTERVAL = 0.0
+    s = PlanState()
+    h, r = plankeys.make_handler(s)
+
+    def press(k):
+        h(N(key=k))
+        r(N(key=k))
+
+    for k in (".", ".", "l", ","):
+        press(k)
+    assert np.isclose(np.rad2deg(s.world_angle), 6)
+    s.start, s.goal = (1.0, 1.0), (2.0, 2.0)
+    press("0")
+    assert s.world_angle == 0 and s.start is None and s.goal is None
+    press("m")
+    assert s.mapped
+    draw = s.sample_draw
+    press("u")
+    assert s.sample_draw == draw + 1
+
+
+@test
 def test_plan_keys():
     s = PlanState()
     k = s.plan_key()

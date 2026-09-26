@@ -89,16 +89,31 @@ on where the cell borders fall, and a gap of width g keeps ⌊g/c⌋ or
 points, or noisy points spread over cells smaller than the noise, walls get
 holes.
 
-### Inflation: world first or grid first (`i`)
+### Inflation: grid first or world first (`i`)
 
+- **grid first** (default): make cells of the obstacles, then grow the
+  *occupied cells* by `inflate`, in the grid (a costmap's inflation layer).
+  This is what a robot building its map from sensor data has to do. The map
+  only knows that a cell is occupied, not where in it the obstacle is, so
+  it must assume the obstacle could be right at the cell's edge: any
+  inflation above 0 adds at least one ring of cells round every occupied
+  cell. The discretization error comes first and the inflation is added on
+  top of it, rounded to whole cells again. The errors compound, so gaps
+  close sooner.
 - **world first:** grow the real obstacles by `inflate`, then make cells of
   the grown shapes. Only possible if you have a geometric model of the
-  world.
-- **grid first:** make cells of the obstacles, then grow the *occupied cells*
-  by `inflate`, in the grid (a costmap's inflation layer). This is what a
-  robot building its map from sensor data has to do. The discretization
-  error comes first, and the inflation is added on top of it and rounded to
-  whole cells again. The errors compound, so gaps close sooner.
+  world, and more precise: every free cell is still at least `inflate` from
+  the obstacles, but no more than it has to be.
+
+With world first and an inflation smaller than a cell, you will see dark
+(obstacle) cells right next to white (free) ones, with no inflation cell in
+between. That isn't a bug. It happens where the obstacle only clips the far
+edge of the dark cell: the dark cell then already reaches more than
+`inflate` beyond the obstacle, so the margin lies inside it, and the next
+cell is free. (World 1 rotated 14°, 0.2 m cells, 0.14 m inflation: 44 dark
+cells border free ones, yet no free cell is closer than 0.141 m to an
+obstacle. Grid first gives none, at the price of free space starting only
+0.245 m from the obstacles.)
 
 The samples rule is always grid first, since it has no model.
 
@@ -174,9 +189,9 @@ overlap unless stated, with planning on (`p`) to see open or blocked.
 
 * **World 1, `>` to 0.5 m, `y`:** the door opens and closes with a few
   centimetres of shift. At 0.25 m it stays open.
-* **World 1 at 0.25 m, `inflate` 0.1, then `i`:** with world-first
-  inflation the door stays open at every offset along y, and with grid first
-  only at 2 %.
+* **World 1 at 0.25 m, `inflate` 0.1:** with grid-first inflation (the
+  default) the door is open at only 2 % of the offsets along y; press `i`
+  for world first and it stays open at every one.
 * **World 1 at 0.5 m, `r`, or hold `.`:** rotated, the door is closed at
   every angle from 0 to 45°. At 0.25 m it stays open at every angle.
 * **World 3, `>` from 0.1 m to 0.3 m:** the diagonal corridor's walls turn
@@ -197,7 +212,7 @@ overlap unless stated, with planning on (`p`) to see open or blocked.
 | | | | |
 |---|---|---|---|
 | arrows / mouse drag | shift the grid (or world) | `m` | cells: any overlap / samples |
-| `shift`+arrows | shift 1/50 cell | `i` | inflate: world first / grid first |
+| `shift`+arrows | shift 1/50 cell | `i` | inflate: grid first / world first |
 | `,` / `.`, `k` / `l` | rotate ∓1°, ∓5° | | |
 | `w` | move the grid / the world | `tab` / `shift-tab` | select a parameter |
 | `x` / `y` / `r` | sweep one cell / the rotation | `>` / `<` | raise / lower it |
@@ -219,7 +234,7 @@ overlap unless stated, with planning on (`p`) to see open or blocked.
 `--set` takes `res`, `inflate`, `imperfect`, `spacing`, `sigma` and
 `min_hits`. `--seed N` picks the buildings (and the samples). Other
 options: `--plan` (start with planning on), `--rule any-overlap|samples`,
-`--inflate-grid`, `--seed N`
+`--inflate grid|world` (the inflation order; the amount is `--set inflate=…`), `--seed N`
 (samples), `--grid-offset DX DY`, `--grid-rotate DEG`, `--world-offset`,
 `--world-rotate`, `--move grid|world`, `--snapshot FILE.png`. A world file
 can list its own probes (see the top of `navdemo/world.py`); without them,
@@ -372,10 +387,15 @@ the world. Both are drawn on top of each other: the real obstacles as black
 outlines, the grid as shaded cells. The robot then drives the plan in the
 *real* world, so anything the grid got wrong shows up as a collision.
 
-### Two ways to get the map (`k` toggles)
+### Two ways to get the map (`m` toggles)
 
-**Known map.** The grid is made up front from the real geometry, with one test
-per cell centre. You plan once and drive.
+**Known map.** The grid is made up front, as a robot would have it from an
+earlier survey with its sensor: from points sampled along the obstacles'
+outlines (orange; `d` hides them), exactly as the grid demo's "samples"
+rule. A cell is occupied if at least `min_hits` points land in it, and the
+occupied cells are then inflated in the grid (there is no geometric model
+to inflate first). `spacing` and `smp_noise` set how dense and how noisy
+the survey was, and `u` draws a fresh one. You plan once and drive.
 
 **Map as we go.** The robot starts with an empty map and a 360° lidar (rays
 cast against the real geometry). As in a real mapping system there are two
@@ -406,12 +426,19 @@ tell which obstacle made which one occupied, so nothing could be removed.
 | `cell` | cell size | 0.1 m |
 | `inflate` | obstacles are grown by this before gridding, so the planner can treat the robot as a point | 0.3 m |
 | `imperfect` | the building as built: corners moved by this much (see the grid demo); `v` for another variant | 0.02 m |
+| `spacing` | known map: distance between survey points along the outlines | 0.05 m |
+| `smp_noise` | known map: noise (std) on the survey points | 0 |
+| `min_hits` | known map: points a cell needs to count as occupied | 1 |
 
-A cell is occupied if any part of it overlaps an obstacle (or the room's
-walls) grown by `inflate`, tested exactly: the same rule as the grid demo's
-"any overlap". Nothing is ever lost from the grid, but coarse cells eat free
-space and close gaps. How cells are made, and what else can go wrong there,
-is the subject of `run_grid.py`.
+The grid stays axis-aligned; the **world can be rotated** under it (`,` /
+`.` by 1°, `k` / `l` by 5°; `0` turns it back and restores the designed start
+and goal). The whole world turns: obstacles, room, start and goal, and the
+robot drives in the rotated world. The survey points turn with it, so
+rotating shows discretization, not new noise. A world that isn't aligned
+with the grid is the normal case, and it is where the grid hurts most.
+
+How cells are made, and what else can go wrong there, is the subject of
+`run_grid.py`.
 
 The robot radius is 0.2 m. The default inflation of 0.3 m is the radius plus
 a 0.1 m margin. With exactly 0.2 m there is no room left for tracking error
@@ -467,11 +494,14 @@ close it, and the robot takes the long way (18 m instead of 9 m).
   the real geometry instead of the grid, RRT\* goes straight through the door
   the grid closed (9 m). World 6 (rooms) is the same.
 * **World 3 (thin walls):** the 5 cm walls are never lost, but they grow as
-  thick as the cells. At 0.5 m the way round is 28 m; at 1 m even the goal
+  thick as the cells. At 0.5 m the way round is 29 m; at 1 m even the goal
   is in an occupied cell.
+* **World 2, rotate the world (`.` held, or `l`):** at the default 0.1 m
+  cells the 0.8 m door is open when the world is aligned with the grid, and
+  closed at 30° and 45°. The maze's one narrow opening closes already at 15°.
 * **`inflate` down to 0.2, then 0:** the plan grazes obstacles. At 0 the
   robot collides in every world.
-* **World 8 (dead end), `k` for mapping as we go:** the robot drives into the
+* **World 8 (dead end), `m` for mapping as we go:** the robot drives into the
   cul-de-sac, sees the back wall, replans and backs out. It drives about
   17 m where the known map needs 12 m.
   - Lower `lidar_rng` to 1.5 m and it goes much deeper in first, driving
@@ -490,7 +520,9 @@ close it, and the robot takes the long way (18 m instead of 9 m).
 
 | | | | |
 |---|---|---|---|
-| `enter` | plan (from where the robot is) | `k` | known map / map as we go |
+| `enter` | plan (from where the robot is) | `m` | known map / map as we go |
+| `,` / `.`, `k` / `l` | rotate the world ∓1°, ∓5° | `0` | unrotated, designed start and goal |
+| `u` / `d` | known map: fresh survey / show its points | | |
 | `space` | drive / pause (plans first if needed) | `p` | planner: A* / RRT / RRT* |
 | `r` | reset (in mapping mode, a fresh map) | | |
 | `1`…`8` / `v` | world / another variant of the building | `n` | A*: 8 / 4 connectivity |
@@ -498,7 +530,7 @@ close it, and the robot takes the long way (18 m instead of 9 m).
 | right click | set the start | `f` | RRT: stop at first path / all iterations |
 | `tab` / `shift-tab` | select a parameter | `s` | shortcut the path |
 | `>` / `<` | raise / lower it | `c` / `b` | control law / turn in place (pure pursuit) |
-| `g` / `o` / `e` | grid / real obstacles / search on/off | `l` / `t` | lookahead geometry / trail on/off |
+| `g` / `o` / `e` | grid / real obstacles / search on/off | `a` / `t` | lookahead geometry / trail on/off |
 | `S` | screenshot | `h` / `q` | key list / quit |
 
 Rows that don't apply (for example RRT's `step` while A\* is selected, or the
@@ -515,9 +547,10 @@ marks the plan as stale until you press `enter`.
 .venv/bin/python run_planning.py --headless --world 8 --mapped        # plan, drive, print a summary
 ```
 
-`--set` takes any row name (`res`, `inflate`, `sensor_range`, `rays`,
+`--set` takes any row name (`res`, `inflate`, `imperfect`, `spacing`,
+`sample_sigma`, `min_hits`, `sensor_range`, `rays`,
 `noise`, `h_weight`, `iterations`, `step`, `goal_bias`, `radius`, `anim`,
-`lookahead`, `vmax`, `kp`, `time_scale`). Other options are `--exact`,
+`lookahead`, `vmax`, `kp`, `time_scale`). Other options are `--rotate DEG`, `--exact`,
 `--law pure-pursuit`, `--no-turn-in-place`, `--snapshot FILE.png` and `--steps N`.
 
 ### Worlds

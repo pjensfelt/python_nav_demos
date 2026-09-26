@@ -12,22 +12,26 @@ from .planners import PLANNERS
 from .planstate import PlanState
 from .sim import CONTROL_LAWS
 
-_CONTINUOUS_KEYS = {">", "<"}
+import numpy as np
+
+# Keys that repeat while held: parameter steps and turning the world.
+_CONTINUOUS_KEYS = {">", "<", ",", ".", "k", "l"}
+_ROTATE = {",": -1, ".": 1, "k": -5, "l": 5}     # degrees, as in run_grid.py
 
 HELP = """
- mission                  map / planner               display
- -------                  -------------               -------
- enter  plan              k  known map / map as we go g  grid
- space  drive / pause                                 o  real obstacles
- r      reset             p  planner: A* / RRT / RRT* e  search (A* cells, tree)
- 1..8   world             n  A*: 4 / 8 connectivity   l  lookahead geometry
- v      another variant of the (imperfect) building
- mouse  left: goal        x  RRT: grid / exact geom.  t  driven trail
-        right: start      f  RRT: stop at 1st path    S  screenshot (2 pngs)
-                          s  shortcut the path
- tab / S-tab  select      c  control law              h  this help
-                          b  pure pursuit: turn in place
- > / <        change it                               q  quit
+ mission                  map / world                 planner / display
+ -------                  -----------                 -----------------
+ enter  plan              m  known map / map as we go p  planner: A* / RRT / RRT*
+ space  drive / pause     , / .  rotate the world 1°  n  A*: 4 / 8 connectivity
+ r      reset             k / l  rotate it 5°         x  RRT: grid / exact geom.
+ 1..8   world             0  unrotated, designed      f  RRT: stop at 1st path
+ mouse  left: goal           start and goal           s  shortcut the path
+        right: start      v  another variant of the   g / o / e  grid / obstacles
+                             (imperfect) building        / search on/off
+ c  control law           u  known map: fresh samples a / t  lookahead / trail
+ b  pure pursuit: turn    d  known map: show samples  S  screenshot (2 pngs)
+    in place              tab / S-tab  select         h  this help
+                          > / <        change it      q  quit
 """
 
 
@@ -65,8 +69,19 @@ def make_handler(state: PlanState, fig=None, ax=None, demo="planning"):
             state.newWorld = int(k) - 1
         elif k == "v":
             state.variant += 1
-        elif k == "k":
+        elif k == "m":
             state.mapped = not state.mapped
+        elif k in _ROTATE:
+            state.world_angle += np.deg2rad(_ROTATE[k])
+        elif k == "0":
+            # back to the designed setup: the world unrotated, and the start
+            # and goal the world was built to demo
+            state.world_angle = 0.0
+            state.start = state.goal = None
+        elif k == "u":
+            state.sample_draw += 1
+        elif k == "d":
+            state.show_samples = not state.show_samples
         elif k == "p":
             state.planner = _cycle(PLANNERS, state.planner)
         elif k == "n":
@@ -95,7 +110,7 @@ def make_handler(state: PlanState, fig=None, ax=None, demo="planning"):
             state.show_geometry = not state.show_geometry
         elif k == "e":
             state.show_search = not state.show_search
-        elif k == "l":
+        elif k == "a":
             state.show_lookahead = not state.show_lookahead
         elif k == "t":
             state.show_trail = not state.show_trail

@@ -17,7 +17,8 @@ from navdemo import app, draw, plandraw, plankeys
 from navdemo.mission import Mission
 from navdemo.planners import PLANNERS
 from navdemo.planstate import PlanState, ROBOT_RADIUS, TUNABLE_BY_NAME
-from navdemo.world import World, builtin_worlds, imperfect
+from navdemo.rasterize import sample_outlines
+from navdemo.world import World, builtin_worlds, centre, imperfect, moved, transform_obstacles
 
 
 def parse_args():
@@ -25,6 +26,8 @@ def parse_args():
     ap.add_argument("--world", default="1", metavar="1..8|FILE.json",
                     help="built-in world 1..8 (worlds/*.json) or a world file")
     ap.add_argument("--planner", choices=PLANNERS, default="A*")
+    ap.add_argument("--rotate", type=float, default=0.0, metavar="DEG",
+                    help="rotate the world under the grid")
     ap.add_argument("--mapped", action="store_true",
                     help="start mapping as we go (lidar) instead of with the known map")
     ap.add_argument("--exact", action="store_true",
@@ -52,7 +55,8 @@ def main():
 
     state = PlanState(planner=args.planner, mapped=args.mapped, exact_geometry=args.exact,
                       turn_in_place=not args.no_turn_in_place,
-                      law={"heading-P": "heading-P", "pure-pursuit": "pure pursuit"}[args.law])
+                      law={"heading-P": "heading-P", "pure-pursuit": "pure pursuit"}[args.law],
+                      world_angle=np.deg2rad(args.rotate))
     for item in args.set:
         name, _, raw = item.partition("=")
         if name not in TUNABLE_BY_NAME:
@@ -64,16 +68,55 @@ def main():
     else:
         base = World.load(args.world)
 
-    def build_world():
+    cache = {}
+
+    def built():
         """The building as built: `base` (as drawn in its file) with its
         corners moved a little, the same for the same seed and variant."""
-        rng_b = np.random.default_rng([args.seed or 0, 7, state.variant])
-        return imperfect(base, state.value("imperfect"), rng_b)
+        key = ("built", id(base), state.value("imperfect"), state.variant)
+        if key not in cache:
+            rng_b = np.random.default_rng([args.seed or 0, 7, state.variant])
+            cache[key] = imperfect(base, state.value("imperfect"), rng_b)
+        return cache[key]
+
+    def turn(points):
+        """Points of the building, turned with the world (about the room's
+        middle as drawn)."""
+        return transform_obstacles([], centre(base), (0, 0), state.world_angle)[1](points)
+
+    def build_world():
+        """The building as built, turned by the world's rotation under the
+        (fixed, axis-aligned) grid, with any clicked start and goal."""
+        b = built()
+        if state.start is not None or state.goal is not None:
+            b = World(b.obstacles, b.bounds,
+                      (*(state.start or b.start[:2]), np.rad2deg(b.start[2])),
+                      state.goal or b.goal, name=b.name, probes=b.probes, room=b.room,
+                      anchor=b.anchor)
+        return moved(b, (0, 0), state.world_angle, pivot=centre(base))
+
+    def samples():
+        """The known map's survey: points on the building's outlines, drawn
+        once per building and settings ('u' for a fresh set) and turned with
+        the world -- so rotating it shows discretization, not new noise."""
+        key = ("samples", id(base), state.value("imperfect"), state.variant,
+               state.value("spacing"), state.value("sample_sigma"), state.sample_draw)
+        if key not in cache:
+            b = built()
+            rng_s = np.random.default_rng([args.seed or 0, 11, state.sample_draw])
+            cache[key] = sample_outlines(b.obstacles, b.room, state.value("spacing"),
+                                         state.value("sample_sigma"), rng_s)
+        return turn(cache[key])
+
+    def unturn(p):
+        """A clicked point (in the drawing) back into the building's own,
+        unrotated coordinates."""
+        return tuple(transform_obstacles([], centre(base), (0, 0), -state.world_angle)[1](p)[0])
 
     world = build_world()
     world_key = state.world_key()
     mission = Mission(world, ROBOT_RADIUS, rng)
-    mission.build_map(state.mission_config())
+    mission.build_map(state.mission_config(), samples())
     grid_key = state.grid_key()
     plan_key = None                   # settings the current plan was made with
     replay = {"k": 0, "per_frame": 1, "result": None}
@@ -90,6 +133,7 @@ def main():
         search = plandraw.SearchArtist(ax)
         scan_art = plandraw.ScanArtist(ax)
         cspace = plandraw.CSpaceArtist(ax)
+        (sample_dots,) = ax.plot([], [], ".", color="tab:orange", ms=2, zorder=7)
         old_lines = []
         (raw_line,) = ax.plot([], [], ":", color="C0", lw=1, zorder=6)
         (plan_line,) = ax.plot([], [], color="C0", lw=2.5, alpha=0.8, zorder=6)
@@ -138,8 +182,15 @@ def main():
         new_base = state.newWorld is not None and state.newWorld < len(worlds)
         if new_base:
             base = worlds[state.newWorld]
+            state.world_angle = 0.0
+            state.start = state.goal = None
             print(f"world: {base.name}")
         state.newWorld = None
+        # clicks: into the building's own coordinates, so they turn with it
+        if state.newStart is not None:
+            state.start, state.newStart = unturn(state.newStart), None
+        if state.newGoal is not None:
+            state.goal, state.newGoal = unturn(state.newGoal), None
         if new_base or state.world_key() != world_key:
             world = build_world()
             world_key = state.world_key()
@@ -147,19 +198,10 @@ def main():
             grid_key = None
             if fig is not None:
                 obstacles.set_world(world)
-                plandraw.set_world_limits(ax, world)
+                plandraw.set_world_limits(ax, world, grow=not new_base and state.world_angle != 0)
         if state.grid_key() != grid_key:
-            mission.build_map(cfg)
+            mission.build_map(cfg, samples())
             grid_key = state.grid_key()
-            plan_key = None
-            start_replay(None, False)
-        if state.newStart is not None or state.newGoal is not None:
-            if state.newStart is not None:
-                mission.start = (*state.newStart, mission.start[2])
-            if state.newGoal is not None:
-                mission.goal = state.newGoal
-            state.newStart = state.newGoal = None
-            mission.reset()
             plan_key = None
             start_replay(None, False)
         if state.reset:
@@ -219,6 +261,8 @@ def main():
         obstacles.set_visible(state.show_geometry)
         search.set(replay["result"], mission.grid, replay["k"], state.show_search)
         scan_art.set(mission.scan if state.mapped else None)
+        pts = samples() if (not state.mapped and state.show_samples) else np.empty((0, 2))
+        sample_dots.set_data(pts[:, 0], pts[:, 1])
         show_plan = not replaying()
         path = np.array(mission.path) if (mission.path and show_plan) else np.empty((0, 2))
         plan_line.set_data(path[:, 0], path[:, 1])

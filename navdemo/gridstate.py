@@ -73,7 +73,10 @@ class Pose:
 class GridState:
     running: bool = True
     rule: str = RULES[0]
-    inflate_order: str = INFLATE_ORDERS[0]
+    # Grid first by default: what a real map (from sensor data, a costmap)
+    # has to do, and the safe choice -- any inflation adds at least a ring of
+    # cells. World first (needs a model) is one 'i' away, to compare.
+    inflate_order: str = INFLATE_ORDERS[1]
     grid: Pose = field(default_factory=Pose)
     world: Pose = field(default_factory=Pose)
     moving: str = TARGETS[0]                     # what the keys and the mouse move

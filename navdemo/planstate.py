@@ -18,6 +18,9 @@ ROBOT_RADIUS = 0.2   # m, as in run_pure_pursuit.py / display_robot.m
 _RES = [0.05, 0.1, 0.2, 0.25, 0.5, 1.0]
 _INFLATE = [round(0.02 * i, 2) for i in range(26)]      # 0 to 0.5 m in 2 cm steps
 _IMPERFECT = [0.0, 0.005, 0.01, 0.02, 0.05]
+_SPACING = [0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5]
+_SAMPLE_SIGMA = [0.0, 0.01, 0.02, 0.05, 0.1, 0.2]
+_MIN_HITS = [1, 2, 3, 5, 10]
 _HWEIGHT = [0.0, 0.5, 1.0, 2.0, 5.0]
 _ITER = [100, 250, 500, 1000, 2000, 5000, 10000]
 _STEP = [0.1, 0.25, 0.5, 1.0, 2.0]
@@ -47,6 +50,11 @@ TUNABLES: List[Tunable] = [
     Tunable("inflate", "inflate", _INFLATE, _INFLATE.index(0.3), "m"),
     # the world as built, not as drawn (see world.imperfect); 0 = as drawn
     Tunable("imperfect", "imperfect", _IMPERFECT, _IMPERFECT.index(0.02), "m"),
+    # the known map: made from points on the outlines, as from an earlier
+    # survey with a sensor (as the grid demo's "samples" rule)
+    Tunable("spacing", "spacing", _SPACING, _SPACING.index(0.05), "m"),
+    Tunable("sample_sigma", "smp_noise", _SAMPLE_SIGMA, 0, "m"),
+    CountTunable("min_hits", "min_hits", _MIN_HITS, 0),
     # the sensor, when mapping as we go
     Tunable("sensor_range", "lidar_rng", _SENSOR_RANGE, _SENSOR_RANGE.index(3.0), "m"),
     CountTunable("rays", "rays", _RAYS, _RAYS.index(180)),
@@ -102,6 +110,13 @@ class PlanState:
     # one-shot requests
     world_idx: int = 0
     variant: int = 0                   # bumped by 'v' for another imperfect building
+    world_angle: float = 0.0           # rad: the world rotated under the (fixed) grid
+    sample_draw: int = 0               # bumped by 'u' for a fresh set of samples
+    show_samples: bool = True
+    # Clicked start / goal in the building's own (unrotated) coordinates, so
+    # they turn with the world; None = as designed ('0' restores them).
+    start: object = None
+    goal: object = None
     newWorld: object = None            # an int (1..9 key) or a World
     plan: bool = False
     drive: bool = False                # space: start / pause execution
@@ -128,6 +143,8 @@ class PlanState:
             return self.law == "heading-P"
         if t.name in ("sensor_range", "rays", "noise"):
             return self.mapped
+        if t.name in ("spacing", "sample_sigma", "min_hits"):
+            return not self.mapped
         return self.planner in _ONLY_FOR.get(t.name, {self.planner})
 
     def visible(self):
@@ -155,13 +172,16 @@ class PlanState:
 
     def world_key(self):
         """Everything the building depends on (besides which world it is)."""
-        return (self.value("imperfect"), self.variant)
+        return (self.value("imperfect"), self.variant, self.world_angle, self.start, self.goal)
 
     def grid_key(self):
         """Everything the map depends on: a change means starting over."""
         key = (self.mapped, self.value("res"), self.value("inflate"))
         if self.mapped:
             key += (self.value("sensor_range"), self.value("rays"), self.value("noise"))
+        else:
+            key += (self.value("spacing"), self.value("sample_sigma"), self.value("min_hits"),
+                    self.sample_draw)
         return key
 
     def plan_key(self):

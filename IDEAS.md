@@ -127,6 +127,13 @@ left for later.
 
 ## For the planning demo
 
+Done 2026-09-26: the known map is made from samples as in the grid demo
+(spacing, noise, min_hits; inflated in the grid), and the world can be
+rotated under the axis-aligned grid (`,` `.` `k` `l`, `0` back). The
+map-as-you-go toggle moved from `k` to `m`, the lookahead display from `l`
+to `a`, so rotation uses the same keys in both demos. The grid demo now
+starts with grid-first inflation.
+
 - **Corner cutting** as a third choice next to `n`'s 4 / 8 connectivity
   (moved here from the grid demo, which isn't about planning): let 8-connected
   A* squeeze diagonally between two occupied cells that touch at a corner.

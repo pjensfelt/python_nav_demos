@@ -38,8 +38,10 @@ def parse_args():
     ap.add_argument("--seed", type=int, default=0, help="seed for the sample points")
     ap.add_argument("--plan", action="store_true",
                     help="start with planning between the probe points on ('p' toggles)")
-    ap.add_argument("--inflate-grid", action="store_true",
-                    help="inflate in the grid (as from sensor data), not the real geometry")
+    ap.add_argument("--inflate", choices=["grid", "world"], default="grid",
+                    help="inflation order: 'grid' grows the occupied cells, in the grid "
+                         "(as from sensor data); 'world' grows the real geometry, then makes "
+                         "cells (needs a model). The amount is --set inflate=METRES")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                     help="preset res or inflate, e.g. --set res=0.25")
     ap.add_argument("--grid-offset", type=float, nargs=2, default=[0.0, 0.0], metavar=("DX", "DY"))
@@ -64,7 +66,7 @@ def main():
     worlds = grid_worlds()
     state = GridState(rule=args.rule.replace("-", " "),
                       moving=args.move,
-                      inflate_order="grid first" if args.inflate_grid else "world first",
+                      inflate_order=f"{args.inflate} first",
                       planning=args.plan)
     for item in args.set:
         name, _, raw = item.partition("=")

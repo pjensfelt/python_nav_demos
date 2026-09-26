@@ -174,11 +174,16 @@ class World:
     world (see `imperfect`) has a slightly irregular one, and `bounds` is then
     the box around it."""
 
-    def __init__(self, obstacles, bounds, start, goal, name="world", probes=None, room=None):
+    def __init__(self, obstacles, bounds, start, goal, name="world", probes=None, room=None,
+                 anchor=None):
         self.obstacles = list(obstacles)
         if room is None:
             x0, x1, y0, y1 = bounds
             room = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        # Where the cell lattice is anchored: the room's corner as drawn. It
+        # stays put when the building is perturbed or moved, so that moving
+        # the world really moves it across the cells.
+        self.anchor = tuple(anchor) if anchor is not None else (float(bounds[0]), float(bounds[2]))
         self.room = np.asarray(room, dtype=float)
         self.walls = Outside(self.room)
         lo, hi = self.room.min(axis=0), self.room.max(axis=0)
@@ -237,7 +242,56 @@ def imperfect(world, sigma, rng):
             obs.append(Polygon(ob.v + rng.normal(0, sigma, ob.v.shape)))
     room = world.room + rng.normal(0, sigma, world.room.shape)
     w = World(obs, world.bounds, (*world.start[:2], np.rad2deg(world.start[2])), world.goal,
-              name=world.name, probes=world.probes, room=room)
+              name=world.name, probes=world.probes, room=room, anchor=world.anchor)
+    return w
+
+
+def transform_obstacles(obstacles, pivot, offset, angle):
+    """The obstacles rotated by `angle` about `pivot`, then shifted by
+    `offset`. Also returns the function that moves points the same way."""
+    c, s = np.cos(angle), np.sin(angle)
+    R = np.array([[c, -s], [s, c]])
+    pivot, offset = np.asarray(pivot, float), np.asarray(offset, float)
+
+    def move(P):
+        # written out rather than `@ R.T`: numpy 2 on macOS (Accelerate) emits
+        # spurious divide-by-zero warnings from matmul on some inputs
+        d = np.atleast_2d(P) - pivot
+        return np.column_stack([c * d[:, 0] - s * d[:, 1],
+                                s * d[:, 0] + c * d[:, 1]]) + pivot + offset
+
+    out = []
+    for ob in obstacles:
+        if isinstance(ob, Circle):
+            out.append(Circle(move(ob.c)[0], ob.r))
+        elif isinstance(ob, Outside):
+            out.append(Outside(move(ob.v)))
+        else:
+            out.append(Polygon(move(ob.v)))
+    return out, move
+
+
+def centre(world):
+    """The middle of the room as drawn: what the world is rotated about."""
+    x, y = world.anchor
+    return np.array([x + (world.bounds[1] - world.bounds[0]) / 2,
+                     y + (world.bounds[3] - world.bounds[2]) / 2])
+
+
+def moved(world, offset, angle, pivot=None):
+    """The whole world -- obstacles, room, start (with its heading), goal and
+    probe points -- rotated by `angle` about `pivot` (the room's middle) and
+    shifted by `offset`, as if the building sat at a different pose under an
+    axis-aligned grid. The cell lattice (`anchor`) stays where it was."""
+    if not np.any(offset) and angle == 0:
+        return world
+    pivot = centre(world) if pivot is None else pivot
+    obs, move = transform_obstacles(world.obstacles, pivot, offset, angle)
+    sx, sy = move(world.start[:2])[0]
+    start = (sx, sy, np.rad2deg(world.start[2] + angle))
+    probes = [(n, tuple(move(a)[0]), tuple(move(b)[0])) for n, a, b in world.probes]
+    w = World(obs, world.bounds, start, tuple(move(world.goal)[0]), name=world.name,
+              probes=probes, room=move(world.room), anchor=world.anchor)
     return w
 
 

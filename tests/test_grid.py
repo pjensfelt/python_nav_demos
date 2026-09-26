@@ -361,7 +361,7 @@ def test_samples_rule_state():
         press("tab")                           # cursor onto a samples-only row
     assert gridstate.TUNABLES[s.cursor].name in gridstate.SAMPLE_ONLY
     press("m")
-    assert s.rule == "any overlap" and s.effective_inflate_order == "world first"
+    assert s.rule == "any overlap" and s.effective_inflate_order == "grid first"
     assert s.cursor in s.visible()             # not left on a hidden row
     for _ in range(6):
         press("tab")
