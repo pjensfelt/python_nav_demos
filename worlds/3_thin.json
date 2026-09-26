@@ -1,11 +1,11 @@
 {
   "name": "thin walls",
-  "comment": "5 cm walls. With center sampling and 1 m cells (or 0.5 m cells and 0.2 m inflation) no cell centre is close enough to them, so they vanish from the grid -- and the robot drives into them.",
+  "comment": "5 cm walls. They are never lost from the grid (any part of a cell overlapping them marks it), but they get as thick as the cells: at 0.5 m cells the way round is 28 m, and at 1 m cells even the goal is in an occupied cell.",
   "bounds": [0, 10, 0, 10],
   "start": [1, 1, 90],
   "goal": [9, 9],
   "obstacles": [
-    {"type": "wall", "from": [3, 0], "to": [3, 8], "thickness": 0.05},
-    {"type": "wall", "from": [7, 2], "to": [7, 10], "thickness": 0.05}
+    {"type": "wall", "from": [3.0, -0.2], "to": [3, 8], "thickness": 0.05},
+    {"type": "wall", "from": [7, 2], "to": [7.0, 10.2], "thickness": 0.05}
   ]
 }

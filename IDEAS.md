@@ -11,7 +11,7 @@ seen RRT and friends in known worlds in the planning module.
 |---|---|---|
 | 2–3 | Recap: robot-relative uncertainty, covariance | loc demos (`v` in EKF-SLAM, covariance heatmap) |
 | 4 | "Show planning output from grid based and sampled based" | `run_planning.py`, A* vs RRT/RRT* |
-| 9–10 | Occupancy grids: cell size, amount of expansion | `cell`, `inflate`, center/conservative cells |
+| 9–10 | Occupancy grids: cell size, amount of expansion | `run_grid.py`; `cell`, `inflate` in `run_planning.py` |
 | 11 | Paths close to obstacles, grid-aligned, not smooth | visible in every A* plan |
 | 12 | "Why can we not just expand obstacles more?" | world 2: raise `inflate` and the door closes |
 | 16 | Path smoothing: direct connection between nodes | `s` (shortcut) |
@@ -19,7 +19,52 @@ seen RRT and friends in known worlds in the planning module.
 | 24 | Environment not fully known, replanning | map-as-you-go mode (`k`) |
 | 37 (type II) | A sensor outlier gets the robot stuck | `sig_rng` 0.1 m while mapping → no path |
 
-## Grid demo (`run_grid.py`) — agreed as the starting point
+## Grid demo (`run_grid.py`) — built 2026-09-26
+
+Built as described below, with the two open questions decided as:
+inflation is included but defaults to 0 (pure world → cells first), and
+robot shape is left for later (only a 0.2 m circle for scale). Probes can be
+listed per world, so one world can compare two passages. See the README.
+
+Added while building, after discussion:
+- starts at 0.1 m cells; the panel shows cells, memory and the time to make
+  the grid and to run A* on it (the cost side of resolution);
+- the *grid* moves (shift and rotate) over a fixed world, `w` to move the
+  world instead; a rotation sweep; the grid always covers the whole world;
+- inflation order `i`: world first (needs a model) vs grid first (as from
+  sensor data, compounds the discretization error);
+- a third cell rule, **samples**: points along the outlines with 2D noise and
+  a minimum hit count, with inflation forced to grid first. Shows hollow
+  obstacles, holes from sparse samples, and that with noisy points a finer
+  grid can leak where a coarser one doesn't;
+- probes use A* (shortest path on the grid, and its length vs the straight
+  line) instead of a flood fill; `n` for 8 / 4 / 8-with-corner-cutting moves;
+- the world's boundary is a wall (a room), so nothing escapes round the ends
+  of walls when the grid is rotated;
+- planning starts off (`p` turns it on): the demo is about the grid;
+- the grid demo's worlds settled as: door, pillars, a narrow (0.6 m)
+  corridor along the room's diagonal joining two rooms (it closes when the
+  cells get too big), and a thin partition with a doorway (samples leak
+  through the wall); the strip charts were dropped (the sweep animation
+  and the panel say it; headless sweeps still print the table);
+  walls that end at the room's boundary reach 0.2 m past it, so that the
+  imperfect building never leaves a crack there;
+- removed again: the changed-cells overlay against a reference pose (there
+  is no privileged reference -- every pose is just another realisation) and
+  the dashed outline of the grown obstacles (confusing, and it didn't cover
+  the room's walls); inflation now in 2 cm steps; one ring of cells round
+  the room so its walls show up in the grid;
+- worlds as built, not as drawn (both demos): every corner moved by 2D
+  noise (`imperfect`, 2 cm by default), rooms not quite square, `v` for
+  another variant -- round numbers in the world files lined up with the
+  cell lattice in ways no real building does;
+- the center-sampling rule was dropped again: the one thing it showed, a
+  thin wall vanishing, samples mode shows more realistically (holes from
+  sparse or noisy points). Dropped from the planning demo too, which now
+  uses the same exact any-overlap rule (for the pre-built map and for the
+  cells around each lidar hit).
+
+
 
 A stripped-down demo that exposes only the real world and its grid, and the
 options connected to them, so the discussion can start from the grid itself
@@ -41,9 +86,9 @@ scale.
   pass-throughs, and counting them *is* a fraction, which is where occupancy
   probabilities come from.
 - **Make "any overlap" exact:** test the cell square itself against the
-  grown obstacle. The current "conservative" rule in `grid.py` is an
-  approximation (centre within `inflate` + half the cell diagonal) that
-  marks a few extra cells near corners.
+  grown obstacle, instead of the old approximation in `grid.py` (centre
+  within `inflate` + half the cell diagonal), which marked a few extra cells
+  near corners. Done; `grid.py` now uses it too.
 
 **The two rules fail in opposite directions:** any overlap loses free space,
 center sampling loses obstacles. With cell size c, a wall of width w covers
@@ -76,12 +121,19 @@ therefore has one free cell at some offsets and none at others.
 wider than two cells, a row of thin pillars, a 45° wall, a thin wall at a
 sub-cell position.
 
-**Still open:**
-1. Inflation in this demo at all, or purely "world → cells" with inflation
-   left to the planning demo? Keeping it makes the door-closing effect much
-   stronger; leaving it out makes the demo cleaner.
-2. Robot shape (slide 10, gap 7) as a footprint you drag around to see which
-   cells it covers: here, or later?
+**Decided when building:** inflation included, default 0; robot shape
+(slide 10, gap 7: a footprint you drag around to see which cells it covers)
+left for later.
+
+## For the planning demo
+
+- **Corner cutting** as a third choice next to `n`'s 4 / 8 connectivity
+  (moved here from the grid demo, which isn't about planning): let 8-connected
+  A* squeeze diagonally between two occupied cells that touch at a corner.
+  A 45° staircase of free cells then counts as open -- as the eye sees it --
+  though a robot of any real size wouldn't fit. Measured in the grid demo's
+  door world at 0.5 m cells, rotated 0–45°: closed at every angle without
+  corner cutting, open at 68 % of them with it.
 
 ## Gaps, in suggested order
 
@@ -96,6 +148,10 @@ sub-cell position.
    To make the trade-off visible it needs **dynamic obstacles**: a person
    standing in a doorway who leaves (slide 36), a chair that is seen and
    then out of view (type I).
+
+   The planning demo's map-as-you-go mode already keeps two layers (the map,
+   and a planning map regenerated from it by inflation), so clearing only
+   has to touch the map.
 
    With clearing, a binary map must decide what a cell that gets both hits
    and pass-throughs is (last writer wins, or occupied beats free); counting

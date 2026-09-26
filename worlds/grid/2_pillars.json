@@ -1,0 +1,19 @@
+{
+  "name": "pillars",
+  "comment": "A row of 10 cm pillars 0.6 m apart (0.5 m gaps). Center sampling misses most of them; any overlap turns the row into a wall or leaves gaps, depending on the offset.",
+  "bounds": [0, 6, 0, 6],
+  "start": [1.25, 3.0, 0],
+  "goal": [4.75, 3.0],
+  "obstacles": [
+    {"type": "circle", "center": [3.0, 0.3], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 0.9], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 1.5], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 2.1], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 2.7], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 3.3], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 3.9], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 4.5], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 5.1], "radius": 0.05},
+    {"type": "circle", "center": [3.0, 5.7], "radius": 0.05}
+  ]
+}

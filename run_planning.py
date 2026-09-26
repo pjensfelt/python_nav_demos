@@ -17,7 +17,7 @@ from navdemo import app, draw, plandraw, plankeys
 from navdemo.mission import Mission
 from navdemo.planners import PLANNERS
 from navdemo.planstate import PlanState, ROBOT_RADIUS, TUNABLE_BY_NAME
-from navdemo.world import World, builtin_worlds
+from navdemo.world import World, builtin_worlds, imperfect
 
 
 def parse_args():
@@ -27,8 +27,6 @@ def parse_args():
     ap.add_argument("--planner", choices=PLANNERS, default="A*")
     ap.add_argument("--mapped", action="store_true",
                     help="start mapping as we go (lidar) instead of with the known map")
-    ap.add_argument("--conservative", action="store_true",
-                    help="conservative cell marking instead of center sampling")
     ap.add_argument("--exact", action="store_true",
                     help="RRT/RRT*: check collisions against the exact geometry, not the grid")
     ap.add_argument("--law", choices=["heading-P", "pure-pursuit"], default="heading-P")
@@ -54,7 +52,6 @@ def main():
 
     state = PlanState(planner=args.planner, mapped=args.mapped, exact_geometry=args.exact,
                       turn_in_place=not args.no_turn_in_place,
-                      raster="conservative" if args.conservative else "center",
                       law={"heading-P": "heading-P", "pure-pursuit": "pure pursuit"}[args.law])
     for item in args.set:
         name, _, raw = item.partition("=")
@@ -63,10 +60,18 @@ def main():
                              + ", ".join(TUNABLE_BY_NAME))
         state.set_value(name, float(raw))
     if args.world in [str(i + 1) for i in range(len(worlds))]:
-        world = worlds[int(args.world) - 1]
+        base = worlds[int(args.world) - 1]
     else:
-        world = World.load(args.world)
+        base = World.load(args.world)
 
+    def build_world():
+        """The building as built: `base` (as drawn in its file) with its
+        corners moved a little, the same for the same seed and variant."""
+        rng_b = np.random.default_rng([args.seed or 0, 7, state.variant])
+        return imperfect(base, state.value("imperfect"), rng_b)
+
+    world = build_world()
+    world_key = state.world_key()
     mission = Mission(world, ROBOT_RADIUS, rng)
     mission.build_map(state.mission_config())
     grid_key = state.grid_key()
@@ -126,20 +131,23 @@ def main():
     cfg = state.mission_config()
 
     def step(_frame=0):
-        nonlocal world, mission, grid_key, plan_key, cfg
+        nonlocal base, world, world_key, mission, grid_key, plan_key, cfg
         cfg = state.mission_config()
 
         # ---- one-shot requests ----------------------------------------
-        if state.newWorld is not None:
-            if state.newWorld < len(worlds):
-                world = worlds[state.newWorld]
-                mission = Mission(world, ROBOT_RADIUS, rng)
-                grid_key = None
-                if fig is not None:
-                    obstacles.set_world(world)
-                    plandraw.set_world_limits(ax, world)
-                print(f"world: {world.name}")
-            state.newWorld = None
+        new_base = state.newWorld is not None and state.newWorld < len(worlds)
+        if new_base:
+            base = worlds[state.newWorld]
+            print(f"world: {base.name}")
+        state.newWorld = None
+        if new_base or state.world_key() != world_key:
+            world = build_world()
+            world_key = state.world_key()
+            mission = Mission(world, ROBOT_RADIUS, rng)
+            grid_key = None
+            if fig is not None:
+                obstacles.set_world(world)
+                plandraw.set_world_limits(ax, world)
         if state.grid_key() != grid_key:
             mission.build_map(cfg)
             grid_key = state.grid_key()

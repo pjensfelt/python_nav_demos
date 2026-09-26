@@ -7,7 +7,6 @@ themselves are listed in HELP.
 import time
 
 from . import app
-from .grid import RASTER_MODES
 from .keys import clear_default_keymap, _MIN_REPEAT_INTERVAL
 from .planners import PLANNERS
 from .planstate import PlanState
@@ -19,9 +18,10 @@ HELP = """
  mission                  map / planner               display
  -------                  -------------               -------
  enter  plan              k  known map / map as we go g  grid
- space  drive / pause     m  cells: center / conserv. o  real obstacles
+ space  drive / pause                                 o  real obstacles
  r      reset             p  planner: A* / RRT / RRT* e  search (A* cells, tree)
  1..8   world             n  A*: 4 / 8 connectivity   l  lookahead geometry
+ v      another variant of the (imperfect) building
  mouse  left: goal        x  RRT: grid / exact geom.  t  driven trail
         right: start      f  RRT: stop at 1st path    S  screenshot (2 pngs)
                           s  shortcut the path
@@ -63,10 +63,10 @@ def make_handler(state: PlanState, fig=None, ax=None, demo="planning"):
             state.reset = True
         elif k in "12345678":
             state.newWorld = int(k) - 1
+        elif k == "v":
+            state.variant += 1
         elif k == "k":
             state.mapped = not state.mapped
-        elif k == "m":
-            state.raster = _cycle(RASTER_MODES, state.raster)
         elif k == "p":
             state.planner = _cycle(PLANNERS, state.planner)
         elif k == "n":

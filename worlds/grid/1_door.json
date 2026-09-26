@@ -1,0 +1,11 @@
+{
+  "name": "door",
+  "comment": "A 0.75 m door in a 0.2 m wall: 1.5 cells at 0.5 m cells. With any overlap it keeps one free cell or none, depending on where the cell borders fall -- move the world a few cm and it opens or closes.",
+  "bounds": [0, 6, 0, 6],
+  "start": [1.25, 3.0, 0],
+  "goal": [4.75, 3.0],
+  "obstacles": [
+    {"type": "wall", "from": [3.0, -0.2], "to": [3.0, 2.625], "thickness": 0.2},
+    {"type": "wall", "from": [3.0, 3.375], "to": [3.0, 6.2], "thickness": 0.2}
+  ]
+}

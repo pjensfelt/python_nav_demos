@@ -54,12 +54,13 @@ def test_grid_marks_obstacles_and_inflation():
 
 
 @test
-def test_thin_wall_vanishes_only_with_center_sampling():
+def test_grid_never_loses_a_thin_wall():
+    """Cells are marked if they overlap an obstacle at all, so a 5 cm wall is
+    kept at any cell size (it just gets as thick as the cells)."""
     thin = World([wall((3.0, 0), (3.0, 10), 0.05)], (0, 10, 0, 10), (1, 1, 0), (9, 1))
-    centre = Grid.from_world(thin, 1.0, 0.3, "center")
-    assert astar(centre, thin.start[:2], thin.goal).path, "center: wall gone, path straight through"
-    cons = Grid.from_world(thin, 1.0, 0.3, "conservative")
-    assert not astar(cons, thin.start[:2], thin.goal).path, "conservative: wall kept, blocked"
+    for res in (0.1, 0.5, 1.0):
+        g = Grid.from_world(thin, res, 0.0)
+        assert not astar(g, thin.start[:2], thin.goal).path, res
 
 
 @test
@@ -200,6 +201,19 @@ def test_stops_at_the_goal():
 
 
 @test
+def test_imperfect_buildings_still_work():
+    """With the default 2 cm imperfection, every world still gets done, known
+    and mapped -- the variant changes the details, not whether it works."""
+    from navdemo.world import imperfect
+    for variant in (0, 1):
+        for w0 in builtin_worlds():
+            w = imperfect(w0, 0.02, np.random.default_rng([0, 7, variant]))
+            for mapped in (False, True):
+                m = _run(w, _cfg(mapped=mapped))
+                assert m.done and not m.collided, (w.name, variant, mapped)
+
+
+@test
 def test_dead_end_costs_extra_when_mapping():
     w = World.load("8_deadend.json")
     known = _run(w, _cfg(mapped=False))
@@ -209,9 +223,10 @@ def test_dead_end_costs_extra_when_mapping():
 
 
 @test
-def test_vanished_wall_means_collision():
-    w = World.load("3_thin.json")
-    m = _run(w, _cfg(res=1.0))
+def test_no_inflation_means_collision():
+    """Planning the robot as a point without growing the obstacles by its
+    radius: the plan grazes the wall and the real robot hits it."""
+    m = _run(World.load("1_gap.json"), _cfg(inflate=0.0))
     assert m.collided
 
 
@@ -221,14 +236,14 @@ def test_exact_geometry_toggle():
     which can't use it (it once handed A* a GeometryChecker and crashed)."""
     s = PlanState(exact_geometry=True)
     assert not s.uses_exact_geometry                 # A* selected
-    w = World.load("3_thin.json")
-    m = _run(w, dict(s.mission_config(), res=1.0))   # plans on the grid, walls vanished
-    assert m.collided
+    w = World.load("2_narrow.json")
+    m = _run(w, dict(s.mission_config(), res=0.5))   # A* on the grid: the door is closed
+    assert not m.path and not m.done
     s.planner = "RRT*"
     assert s.uses_exact_geometry
-    cfg = dict(s.mission_config(), res=1.0, iterations=1500)
+    cfg = dict(s.mission_config(), res=0.5)
     m = _run(w, cfg, seed=1)
-    assert m.done and not m.collided                 # the real walls are respected
+    assert m.done and not m.collided                 # through the real door
     s.mapped = True
     assert not s.uses_exact_geometry                 # mapping: the grid is all there is
 

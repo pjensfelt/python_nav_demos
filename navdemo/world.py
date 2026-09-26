@@ -15,6 +15,9 @@ World files are JSON:
       "bounds": [0, 10, 0, 10],               xmin, xmax, ymin, ymax  [m]
       "start": [1, 1, 0],                     x, y, heading [deg]
       "goal": [9, 9],
+      "probes": [                             optional, for run_grid.py
+        {"name": "door", "from": [1, 3], "to": [5, 3]}
+      ],
       "obstacles": [
         {"type": "box", "center": [5, 3], "size": [0.3, 6], "angle": 0},
         {"type": "wall", "from": [0, 5], "to": [4, 5], "thickness": 0.1},
@@ -109,6 +112,29 @@ class Polygon:
                    for a, b in zip(self.v, np.roll(self.v, -1, axis=0)))
 
 
+class Outside:
+    """Everything outside a convex polygon: the room's walls as one obstacle.
+
+    Its distance is 0 outside the room and, inside it, the distance to the
+    nearest wall. The room may be any convex quadrilateral -- real rooms are
+    never quite square."""
+
+    def __init__(self, points):
+        self.v = np.asarray(points, dtype=float)
+        self.room = Polygon(self.v)
+
+    def distance(self, P):
+        P = np.atleast_2d(P)
+        d = np.min([point_segment_distance(P, a, b)
+                    for a, b in zip(self.v, np.roll(self.v, -1, axis=0))], axis=0)
+        return np.where(self.room.contains(P), d, 0.0)
+
+    def segment_distance(self, p, q):
+        # Inside a convex room the distance to the walls is a concave
+        # function, so along a segment it is smallest at one of the ends.
+        return float(np.min(self.distance(np.array([p, q]))))
+
+
 def box(center, size, angle=0.0):
     """A rectangle, `angle` in degrees."""
     c, (w, h), a = np.asarray(center, float), size, np.deg2rad(angle)
@@ -143,12 +169,26 @@ def _primitive(spec):
 # --------------------------------------------------------------------------
 
 class World:
-    def __init__(self, obstacles, bounds, start, goal, name="world"):
+    """Obstacles inside a room. `room` is the room's four corners
+    (counter-clockwise); by default the rectangle `bounds`, but a perturbed
+    world (see `imperfect`) has a slightly irregular one, and `bounds` is then
+    the box around it."""
+
+    def __init__(self, obstacles, bounds, start, goal, name="world", probes=None, room=None):
         self.obstacles = list(obstacles)
-        self.bounds = tuple(float(b) for b in bounds)   # xmin, xmax, ymin, ymax
+        if room is None:
+            x0, x1, y0, y1 = bounds
+            room = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        self.room = np.asarray(room, dtype=float)
+        self.walls = Outside(self.room)
+        lo, hi = self.room.min(axis=0), self.room.max(axis=0)
+        self.bounds = (float(lo[0]), float(hi[0]), float(lo[1]), float(hi[1]))
         self.start = (float(start[0]), float(start[1]), np.deg2rad(start[2]) if len(start) > 2 else 0.0)
         self.goal = (float(goal[0]), float(goal[1]))
         self.name = name
+        # Pairs of points run_grid.py checks for a free connection through
+        # the grid: [(name, (x, y), (x, y)), ...]. Start to goal by default.
+        self.probes = probes or [("start-goal", self.start[:2], self.goal)]
 
     @classmethod
     def load(cls, filename):
@@ -156,16 +196,15 @@ class World:
         if not f.exists():
             f = WORLD_DIR / f
         spec = json.loads(f.read_text())
+        probes = [(p["name"], tuple(p["from"]), tuple(p["to"])) for p in spec.get("probes", [])]
         return cls([_primitive(o) for o in spec["obstacles"]], spec["bounds"],
-                   spec["start"], spec["goal"], name=spec.get("name", f.stem))
+                   spec["start"], spec["goal"], name=spec.get("name", f.stem), probes=probes)
 
     def distance(self, P):
         """Distance from each point to the nearest obstacle (0 inside one).
-        The world's outer boundary counts as an obstacle too."""
+        The room's walls count as an obstacle too."""
         P = np.atleast_2d(P)
-        xmin, xmax, ymin, ymax = self.bounds
-        d = np.min([P[:, 0] - xmin, xmax - P[:, 0], P[:, 1] - ymin, ymax - P[:, 1]], axis=0)
-        d = np.maximum(d, 0.0)
+        d = self.walls.distance(P)
         for ob in self.obstacles:
             d = np.minimum(d, ob.distance(P))
         return d
@@ -180,6 +219,35 @@ class World:
         return d
 
 
+def imperfect(world, sigma, rng):
+    """The world as built rather than as drawn: every polygon corner (walls,
+    boxes, the room's own corners) moved independently by 2D Gaussian noise
+    of std `sigma`, and every circle moved and resized a little. Walls come
+    out slightly tapered and rooms not quite square, and nothing lines up
+    with the cell lattice by accident any more. Start, goal and probe points
+    stay where they were designed."""
+    if sigma <= 0:
+        return world
+    obs = []
+    for ob in world.obstacles:
+        if isinstance(ob, Circle):
+            obs.append(Circle(ob.c + rng.normal(0, sigma, 2),
+                              max(ob.r + rng.normal(0, sigma / 2), 0.02)))
+        else:
+            obs.append(Polygon(ob.v + rng.normal(0, sigma, ob.v.shape)))
+    room = world.room + rng.normal(0, sigma, world.room.shape)
+    w = World(obs, world.bounds, (*world.start[:2], np.rad2deg(world.start[2])), world.goal,
+              name=world.name, probes=world.probes, room=room)
+    return w
+
+
 def builtin_worlds():
     """The worlds in worlds/, in key order 1..9 (sorted by file name)."""
     return [World.load(f) for f in sorted(WORLD_DIR.glob("*.json"))][:9]
+
+
+def grid_worlds():
+    """For run_grid.py: the worlds made for it (worlds/grid/) first, then
+    the planning worlds, 9 in all."""
+    made = [World.load(f) for f in sorted((WORLD_DIR / "grid").glob("*.json"))]
+    return (made + builtin_worlds())[:9]

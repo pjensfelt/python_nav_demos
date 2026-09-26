@@ -2,24 +2,17 @@
 planners use.
 
 Making the grid is where the world stops looking like itself: every cell
-is either free or occupied, decided by one test per cell. Two choices
-matter, and both are live parameters in run_planning.py:
+is either free or occupied. A cell is occupied if any part of it overlaps
+an obstacle grown by the inflation radius, tested exactly (see
+rasterize.py, shared with run_grid.py). Two choices matter, and both are
+live parameters in run_planning.py:
 
-    resolution  the cell size. Coarse cells close narrow passages, or --
-                with center sampling -- let thin walls fall between cell
-                centres and vanish altogether.
+    resolution  the cell size. Coarse cells close narrow passages.
 
     inflation   the obstacles are grown by this radius before gridding,
                 so the planners can treat the robot as a point. Set it
                 below the robot radius and the plan grazes obstacles that
                 the real robot then hits.
-
-    center      a cell is occupied if its *centre* is within `inflate` of
-                an obstacle. Cheap, but can miss obstacles thinner than a
-                cell.
-    conservative  occupied if *any part* of the cell might be: the centre
-                test with half the cell diagonal added. Never misses
-                anything, but closes gaps sooner.
 
 Grid indexing is occ[ix, iy], x first, as in the WASP assignment 3 GridMap.
 """
@@ -27,9 +20,6 @@ Grid indexing is occ[ix, iy], x first, as in the WASP assignment 3 GridMap.
 from math import ceil, floor, hypot
 
 import numpy as np
-
-RASTER_MODES = ("center", "conservative")
-
 
 class Grid:
     """An occupancy grid over the world's bounds.
@@ -41,11 +31,10 @@ class Grid:
     starts out unknown.
     """
 
-    def __init__(self, bounds, resolution, inflate, mode="center"):
+    def __init__(self, bounds, resolution, inflate):
         self.bounds = bounds
         self.res = float(resolution)
         self.inflate = float(inflate)
-        self.mode = mode
         xmin, xmax, ymin, ymax = bounds
         self.origin = np.array([xmin, ymin])
         self.nx = int(ceil((xmax - xmin) / self.res - 1e-9))
@@ -54,25 +43,22 @@ class Grid:
         self.obstacle = np.zeros((self.nx, self.ny), dtype=bool)
         self.known = np.ones((self.nx, self.ny), dtype=bool)
 
-    @property
-    def slack(self):
-        """How much further than `inflate` a cell centre may be and still
-        count: 0 for center sampling, half the cell diagonal for
-        conservative (so any cell that might touch an obstacle is marked)."""
-        return self.res * np.sqrt(2) / 2 if self.mode == "conservative" else 0.0
-
     def centres(self):
         ix, iy = np.meshgrid(np.arange(self.nx), np.arange(self.ny), indexing="ij")
         return self.origin + (np.column_stack([ix.ravel(), iy.ravel()]) + 0.5) * self.res
 
     @classmethod
-    def from_world(cls, world, resolution, inflate, mode="center"):
-        """The pre-built map: one distance test per cell centre against
-        the real geometry."""
-        g = cls(world.bounds, resolution, inflate, mode)
-        d = world.distance(g.centres()).reshape(g.nx, g.ny)
-        g.obstacle = d <= g.slack + 1e-12
-        g.occ = d <= g.inflate + g.slack + 1e-12
+    def from_world(cls, world, resolution, inflate):
+        """The pre-built map, from the real geometry: a cell is occupied if
+        it overlaps an obstacle (or the room's walls) grown by `inflate`."""
+        from .rasterize import rasterize, room_walls     # (rasterize imports Grid)
+        # one ring of cells round the room, so its walls show up as cells too
+        x0, x1, y0, y1 = world.bounds
+        r_ = resolution
+        bounds = (x0 - r_, x1 + r_, y0 - r_, y1 + r_)
+        r = rasterize(world.obstacles + room_walls(world.room), bounds, resolution, inflate)
+        g = cls(bounds, resolution, inflate)
+        g.obstacle, g.occ = r.obstacle, r.occ
         return g
 
     # ---- cells and coordinates ------------------------------------------

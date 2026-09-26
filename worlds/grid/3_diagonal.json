@@ -1,0 +1,13 @@
+{
+  "name": "diagonal corridor",
+  "comment": "Two triangular rooms joined only by a narrow corridor (0.6 m, the robot is 0.4 m) along the room's diagonal: a 1 m door from the bottom-right room at the corridor's bottom end, one into the upper-left room at its top end. On a grid the corridor's walls are staircases: at cells up to 0.2 m it is open, at 0.25 m it opens and closes with a shift of the grid, and from 0.3 m it is closed. Rotate the grid 45 degrees and the corridor is aligned with it.",
+  "bounds": [0, 6, 0, 6],
+  "start": [4.5, 1.5, 180],
+  "goal": [1.5, 4.5],
+  "obstacles": [
+    {"type": "wall", "from": [-0.15, 0.345], "to": [4.1, 4.595], "thickness": 0.1},
+    {"type": "wall", "from": [4.8, 5.295], "to": [5.655, 6.15], "thickness": 0.1},
+    {"type": "wall", "from": [0.345, -0.15], "to": [1.2, 0.705], "thickness": 0.1},
+    {"type": "wall", "from": [1.9, 1.405], "to": [6.15, 5.655], "thickness": 0.1}
+  ]
+}

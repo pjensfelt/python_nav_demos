@@ -5,7 +5,7 @@
   "start": [1, 2, 0],
   "goal": [9, 2],
   "obstacles": [
-    {"type": "wall", "from": [5, 0], "to": [5, 3.6], "thickness": 0.2},
+    {"type": "wall", "from": [5.0, -0.2], "to": [5, 3.6], "thickness": 0.2},
     {"type": "wall", "from": [5, 4.4], "to": [5, 9.0], "thickness": 0.2}
   ]
 }

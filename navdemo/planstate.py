@@ -9,7 +9,6 @@ from typing import List
 
 import numpy as np
 
-from .grid import RASTER_MODES
 from .params import Tunable
 from .planners import PLANNERS
 from .sim import CONTROL_LAWS
@@ -17,7 +16,8 @@ from .sim import CONTROL_LAWS
 ROBOT_RADIUS = 0.2   # m, as in run_pure_pursuit.py / display_robot.m
 
 _RES = [0.05, 0.1, 0.2, 0.25, 0.5, 1.0]
-_INFLATE = [0.0, 0.1, 0.2, 0.3, 0.5]
+_INFLATE = [round(0.02 * i, 2) for i in range(26)]      # 0 to 0.5 m in 2 cm steps
+_IMPERFECT = [0.0, 0.005, 0.01, 0.02, 0.05]
 _HWEIGHT = [0.0, 0.5, 1.0, 2.0, 5.0]
 _ITER = [100, 250, 500, 1000, 2000, 5000, 10000]
 _STEP = [0.1, 0.25, 0.5, 1.0, 2.0]
@@ -45,6 +45,8 @@ TUNABLES: List[Tunable] = [
     # (pure pursuit cuts corners), and the robot clips obstacles.
     Tunable("res", "cell", _RES, _RES.index(0.1), "m"),
     Tunable("inflate", "inflate", _INFLATE, _INFLATE.index(0.3), "m"),
+    # the world as built, not as drawn (see world.imperfect); 0 = as drawn
+    Tunable("imperfect", "imperfect", _IMPERFECT, _IMPERFECT.index(0.02), "m"),
     # the sensor, when mapping as we go
     Tunable("sensor_range", "lidar_rng", _SENSOR_RANGE, _SENSOR_RANGE.index(3.0), "m"),
     CountTunable("rays", "rays", _RAYS, _RAYS.index(180)),
@@ -85,7 +87,6 @@ class PlanState:
     mapped: bool = False               # build the map as we go (else: known map)
     planner: str = PLANNERS[0]
     eight: bool = True                 # A*: 8- (else 4-) connectivity
-    raster: str = RASTER_MODES[0]
     exact_geometry: bool = False       # RRT/RRT*: check the real geometry, not the grid
     stop_at_goal: bool = True          # RRT: stop at the first path found
     shortcut: bool = False
@@ -100,6 +101,7 @@ class PlanState:
 
     # one-shot requests
     world_idx: int = 0
+    variant: int = 0                   # bumped by 'v' for another imperfect building
     newWorld: object = None            # an int (1..9 key) or a World
     plan: bool = False
     drive: bool = False                # space: start / pause execution
@@ -151,9 +153,13 @@ class PlanState:
             return "grid (the map is all we have)"
         return "grid"
 
+    def world_key(self):
+        """Everything the building depends on (besides which world it is)."""
+        return (self.value("imperfect"), self.variant)
+
     def grid_key(self):
         """Everything the map depends on: a change means starting over."""
-        key = (self.mapped, self.value("res"), self.value("inflate"), self.raster)
+        key = (self.mapped, self.value("res"), self.value("inflate"))
         if self.mapped:
             key += (self.value("sensor_range"), self.value("rays"), self.value("noise"))
         return key
@@ -166,7 +172,7 @@ class PlanState:
 
     def mission_config(self):
         """Everything Mission and Follower need, as one dict."""
-        cfg = dict(FIXED_CONTROL, law=self.law, mapped=self.mapped, raster=self.raster,
+        cfg = dict(FIXED_CONTROL, law=self.law, mapped=self.mapped,
                    planner=self.planner, eight=self.eight,
                    exact_geometry=self.uses_exact_geometry,
                    stop_at_goal=self.stop_at_goal, shortcut=self.shortcut,

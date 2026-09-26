@@ -52,9 +52,8 @@ class ObstacleArtist:
             else:
                 patch = PolygonPatch(ob.v, closed=True, **style)
             self.patches.append(self.ax.add_patch(patch))
-        xmin, xmax, ymin, ymax = world.bounds
-        self.patches.append(self.ax.add_patch(Rectangle(
-            (xmin, ymin), xmax - xmin, ymax - ymin, fill=False, edgecolor="k", lw=1.5, zorder=5)))
+        self.patches.append(self.ax.add_patch(PolygonPatch(
+            world.room, closed=True, fill=False, edgecolor="k", lw=1.5, zorder=5)))
 
     def set_visible(self, v):
         for p in self.patches:
@@ -170,7 +169,7 @@ class CSpaceArtist:
         self.key = None
 
     def set(self, world, inflate, visible):
-        key = (id(world), inflate)
+        key = (world, inflate)                # the world object itself, not its id
         if visible and key != self.key:
             self.clear()
             xmin, xmax, ymin, ymax = world.bounds
@@ -218,8 +217,8 @@ class ScanArtist:
 def add_legend(fig):
     handles = [
         Patch(facecolor=(0, 0, 0, 0.10), edgecolor="k", label="real obstacle"),
-        Patch(facecolor=C_OBSTACLE, label="occupied cell"),
-        Patch(facecolor=C_INFLATE, label="inflation"),
+        Patch(facecolor=C_OBSTACLE, label="map: occupied cell"),
+        Patch(facecolor=C_INFLATE, label="planning map: inflation"),
         Patch(facecolor=C_UNKNOWN, label="unknown (planned as free)"),
         Line2D([], [], color=(0.1, 0.55, 0.3), lw=1, label="RRT tree"),
         Patch(facecolor=(0.9, 0.6, 0.2, 0.5), label="A* expanded"),
@@ -240,7 +239,6 @@ class Panel:
     def update(self, state: PlanState, mission, status):
         g = mission.grid
         rows = [f"map:     {'mapped as we go' if state.mapped else 'known'} (k)",
-                f"cells:   {state.raster} (m)",
                 f"planner: {state.planner} (p)"]
         if state.planner == "A*":
             rows.append(f"         {'8' if state.eight else '4'}-connected (n)")
@@ -260,7 +258,8 @@ class Panel:
             cell = ("[%s]" if i == state.cursor else " %s ") % txt.center(8)
             rows.append(f"{t.label:>9} {cell}")
 
-        rows += ["", f"world:  {mission.world.name}",
+        rows += ["", f"world:  {mission.world.name}"
+                 + (f", variant {state.variant} (v)" if state.value("imperfect") > 0 else ""),
                  f"grid:   {g.nx} x {g.ny} cells, {100 * g.occ.mean():.0f}% occupied"]
         r = mission.result
         if r is not None:

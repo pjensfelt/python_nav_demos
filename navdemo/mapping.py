@@ -1,26 +1,37 @@
 """Building the map as we go: a simulated lidar and a grid that fills in.
 
 Instead of a map made from the real geometry up front (Grid.from_world),
-the robot starts knowing nothing. Each scan:
+the robot starts knowing nothing. Two layers, as in a real mapping system:
 
-    - every cell a ray passes through becomes known free,
-    - every cell near a ray's end point (a hit) becomes occupied -- the
-      hit's own cell as the obstacle, and every cell within `inflate` of
-      the hit point as inflation, exactly as for the pre-built grid.
+    the map       what the sensor has said about each cell, and nothing
+    (obstacle,    else. Each scan: every cell a ray passes through becomes
+     known)       known free, and the cell each hit lands in becomes
+                  occupied. This is the only layer that is ever updated.
+
+    the planning  derived from the map by growing its occupied cells by
+    map (occ)     `inflate` (inflate_cells, as in run_grid.py), and simply
+                  made again whenever the map changes. An inflated map
+                  can't be updated in place -- once cells are merged, you
+                  can't tell which obstacle made which one occupied, so
+                  nothing could ever be removed again. Regenerating from
+                  the map keeps that possible (it takes about a
+                  millisecond at these sizes).
 
 Cells no ray has reached stay unknown, and the planners treat them as
 free: the optimistic "free space assumption". It is what lets the robot
 plan at all before it has seen everything -- and what makes it head
 confidently into a dead end it hasn't seen yet, and replan when it does.
 
-Occupied cells are never cleared again. A real mapper would keep a
-probability per cell (log-odds) so that noise and moving objects can be
-forgotten; that is a natural next step, not done here.
+Occupied cells are never cleared from the map yet. A real mapper would let
+rays clear cells again, or keep a probability per cell (log-odds), so that
+noise and moving objects can be forgotten -- a natural next step, and the
+two-layer structure is what makes it possible.
 """
 
 import numpy as np
 
 from .grid import Grid
+from .rasterize import inflate_cells
 
 
 class Lidar:
@@ -70,20 +81,19 @@ class Lidar:
 
 
 class MappedGrid(Grid):
-    """A grid that starts unknown and is filled in scan by scan."""
+    """A grid that starts unknown and is filled in scan by scan.
 
-    def __init__(self, bounds, resolution, inflate, mode="center"):
-        super().__init__(bounds, resolution, inflate, mode)
+    `obstacle` and `known` are the map; `occ`, what the planners use, is
+    made from them (see the module docstring)."""
+
+    def __init__(self, bounds, resolution, inflate):
+        super().__init__(bounds, resolution, inflate)
         self.known[:] = False
-        # Offsets of all cells whose centre can be within inflate + slack
-        # of a point in the centre cell -- the stencil stamped around
-        # every hit.
-        k = int(np.ceil((self.inflate + self.slack) / self.res)) + 1
-        self._offsets = np.array([(i, j) for i in range(-k, k + 1) for j in range(-k, k + 1)])
 
     def integrate(self, x, y, angles, ranges, hit):
-        """Add one scan taken from (x, y). Returns True if any cell became
-        occupied that wasn't before (the trigger for checking the plan)."""
+        """Add one scan taken from (x, y). Returns True if any cell of the
+        map became occupied that wasn't before (the trigger for checking
+        the plan)."""
         ends = np.column_stack([x + ranges * np.cos(angles), y + ranges * np.sin(angles)])
 
         # Free space: every cell a ray passed through before its end.
@@ -93,22 +103,19 @@ class MappedGrid(Grid):
                 if self.inside(ix, iy):
                     self.known[ix, iy] = True
 
-        # Obstacles: the cells around each hit point.
-        before = self.occ.sum()
-        pts = ends[hit]
-        if len(pts):
-            c = np.floor((pts - self.origin) / self.res).astype(int)
-            cells = (c[:, None, :] + self._offsets[None, :, :]).reshape(-1, 2)
-            pts_rep = np.repeat(pts, len(self._offsets), axis=0)
-            ok = (cells[:, 0] >= 0) & (cells[:, 0] < self.nx) & (cells[:, 1] >= 0) & (cells[:, 1] < self.ny)
-            cells, pts_rep = cells[ok], pts_rep[ok]
-            centres = self.origin + (cells + 0.5) * self.res
-            d = np.hypot(*(centres - pts_rep).T)
-            own = (np.floor((pts - self.origin) / self.res).astype(int))
-            own = own[(own[:, 0] >= 0) & (own[:, 0] < self.nx) & (own[:, 1] >= 0) & (own[:, 1] < self.ny)]
-            self.obstacle[own[:, 0], own[:, 1]] = True
-            infl = cells[d <= self.inflate + self.slack + 1e-12]
-            self.occ[infl[:, 0], infl[:, 1]] = True
-            self.occ[own[:, 0], own[:, 1]] = True
-            self.known[self.occ] = True
-        return self.occ.sum() > before
+        # Obstacles: the cell each hit lands in.
+        c = np.floor((ends[hit] - self.origin) / self.res).astype(int)
+        c = c[(c[:, 0] >= 0) & (c[:, 0] < self.nx) & (c[:, 1] >= 0) & (c[:, 1] < self.ny)]
+        new = ~self.obstacle[c[:, 0], c[:, 1]]
+        if not new.any():
+            return False
+        self.obstacle[c[:, 0], c[:, 1]] = True
+        self.known[c[:, 0], c[:, 1]] = True
+        self.update_planning_map()
+        return True
+
+    def update_planning_map(self):
+        """Make the planning map again from the map."""
+        self.occ = self.obstacle.copy()
+        if self.inflate > 0:
+            self.occ |= inflate_cells(self.obstacle, self.res, self.inflate)

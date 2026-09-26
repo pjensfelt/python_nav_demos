@@ -1,0 +1,11 @@
+{
+  "name": "thin partition",
+  "comment": "A 3 cm partition across the room with a 0.7 m doorway near the top; the probe points are on either side of it, far from the doorway, so the right path is the long way round. With noisy or sparse samples the partition gets holes and the planned path goes straight through the wall; with coarse cells the partition eats into the doorway until it closes.",
+  "bounds": [0, 6, 0, 6],
+  "start": [1.5, 1.0, 0],
+  "goal": [4.7, 1.0],
+  "obstacles": [
+    {"type": "wall", "from": [3.1, -0.2], "to": [3.1, 4.9], "thickness": 0.03},
+    {"type": "wall", "from": [3.1, 5.6], "to": [3.1, 6.2], "thickness": 0.03}
+  ]
+}

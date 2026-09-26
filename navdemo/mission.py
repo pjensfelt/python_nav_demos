@@ -44,10 +44,10 @@ class Mission:
     def build_map(self, cfg):
         """(Re)make the grid for the current settings and reset the mission."""
         if cfg["mapped"]:
-            self.grid = MappedGrid(self.world.bounds, cfg["res"], cfg["inflate"], cfg["raster"])
+            self.grid = MappedGrid(self.world.bounds, cfg["res"], cfg["inflate"])
             self.lidar = Lidar(cfg["sensor_range"], cfg["rays"], cfg["noise"], self.rng)
         else:
-            self.grid = Grid.from_world(self.world, cfg["res"], cfg["inflate"], cfg["raster"])
+            self.grid = Grid.from_world(self.world, cfg["res"], cfg["inflate"])
             self.lidar = None
         self.reset()
 
@@ -55,7 +55,7 @@ class Mission:
         """Robot back to the start, plan and history cleared; a mapped
         grid keeps nothing (a fresh start means a fresh map)."""
         if self.lidar is not None:
-            self.grid = MappedGrid(self.world.bounds, self.grid.res, self.grid.inflate, self.grid.mode)
+            self.grid = MappedGrid(self.world.bounds, self.grid.res, self.grid.inflate)
         self.robot = Robot(*self.start)
         self.follower = None
         self.result = None           # the latest PlanResult
