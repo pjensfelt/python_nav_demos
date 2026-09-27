@@ -41,9 +41,9 @@ def arc(x, y, a, kappa, length, n=60):
 class RobotArtist:
     """A circle with a heading line, as display_robot.m drew it."""
 
-    def __init__(self, ax, color="k"):
-        (self.body,) = ax.plot([], [], color=color, lw=2, zorder=6)
-        (self.head,) = ax.plot([], [], color=color, lw=2, zorder=6)
+    def __init__(self, ax, color="k", ls="-", lw=2):
+        (self.body,) = ax.plot([], [], color=color, lw=lw, ls=ls, zorder=6)
+        (self.head,) = ax.plot([], [], color=color, lw=lw, ls=ls, zorder=6)
         (self.center,) = ax.plot([], [], "x", color=color, ms=5, zorder=6)
         self._circle = np.linspace(0, 2 * np.pi, 73)
 
@@ -54,9 +54,27 @@ class RobotArtist:
                            y + np.sin(a) * np.array([R, R + 0.3]))
         self.center.set_data([x], [y])
 
+    def set_visible(self, visible):
+        for h in self.artists:
+            h.set_visible(visible)
+
     @property
     def artists(self):
         return [self.body, self.head, self.center]
+
+
+class EstimateArtist(RobotArtist):
+    """Where the controller believes the robot is (Follower.est), shown
+    only while there is a localization error."""
+
+    def __init__(self, ax):
+        super().__init__(ax, color="tab:purple", ls="--", lw=1.5)
+
+    def set(self, f, visible=True):
+        show = visible and bool(np.any(f.err))
+        self.set_visible(show)
+        if show:
+            self.set_pose(*f.est)
 
 
 class GeometryArtist:
@@ -77,7 +95,7 @@ class GeometryArtist:
             h.set_visible(visible)
         if not visible:
             return
-        x, y, a = f.robot.pose
+        x, y, a = f.est       # the controller's view: from the pose estimate
         self.circle.set_data(x + lookahead * np.cos(self._circ),
                              y + lookahead * np.sin(self._circ))
         self.closest.set_data([f.closest_pt[0]], [f.closest_pt[1]])
@@ -148,10 +166,12 @@ class Panel:
     def update(self, state: DemoState, f: Follower):
         rows = ["        VALUE", "        -----"]
         for i, t in enumerate(TUNABLES):
+            if not state.relevant(t):
+                rows.append("")         # unused by this law: a gap, so rows don't move
+                continue
             txt = t.format(state.value(t.name))
             cell = ("[%s]" if i == state.cursor else " %s ") % txt.center(9)
-            note = "" if t.law in (None, state.law) else "  (unused)"
-            rows.append(f"{t.label:>7} {cell}{note}")
+            rows.append(f"{t.label:>7} {cell}")
 
         if f.done:
             status = f"GOAL at t={f.t_done:.2f}s"
@@ -161,7 +181,7 @@ class Panel:
             "",
             f"law:    {state.law}",
             f"turn in place: {'on' if state.turnInPlace else 'off'} (b)"
-            + ("" if state.law == "pure pursuit" else " (unused)"),
+            if state.law == "pure pursuit" else "",
             f"path:   {f.path.name} ({f.path.length:.2f} m)",
             f"status: {status}",
             "",

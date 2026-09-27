@@ -220,6 +220,55 @@ def test_keys_and_mouse_drawing():
     plt.close(fig)
 
 
+@test
+def test_only_the_laws_own_parameters_are_selectable():
+    """Rows the control law doesn't use are hidden, and tab steps over them;
+    switching to a law that hides the selected row moves the cursor on."""
+    from types import SimpleNamespace
+    from navdemo import keys
+    state = DemoState()
+    keys._MIN_REPEAT_INTERVAL = 0.0
+    handler, release = keys.make_handler(state)
+
+    def press(k):
+        handler(SimpleNamespace(key=k))
+        release(SimpleNamespace(key=k))
+
+    names = [t.name for t in TUNABLES]
+    state.cursor = names.index("lookahead")
+    press("c"); press("c")
+    assert state.law == "stop and turn"
+    assert state.relevant(state.selected) and state.selected.name == "vmax"
+    seen = set()
+    for _ in range(len(TUNABLES)):
+        press("tab")
+        seen.add(state.selected.name)
+    assert not seen & {"lookahead", "kp", "sigma"} and "loc_xy" in seen
+    press("c")                                  # heading-P: everything back
+    assert all(state.relevant(t) for t in TUNABLES)
+
+
+@test
+def test_localization_jitter():
+    """The controller sees the true pose plus fresh noise at every control
+    step (no drift); the logged cross-track error is still the true one."""
+    path = builtin_paths()[1]
+    state = DemoState()
+    state.set_value("loc_xy", 0.05)
+    p = state.controller_params()
+    f = Follower(path, Robot(*path.start, 0.0), np.random.default_rng(0))
+    errs = []
+    for _ in range(300):
+        f.advance(p["ctrl_dt"], p)
+        errs.append(f.err[:2].copy())
+    errs = np.array(errs)
+    assert abs(errs.std() - 0.05) < 0.01 and np.abs(errs.mean(axis=0)).max() < 0.01
+    # consecutive errors independent: jitter, not drift
+    assert abs(np.corrcoef(errs[:-1, 0], errs[1:, 0])[0, 1]) < 0.2
+    x, y, _ = f.robot.pose
+    assert abs(abs(f.e) - abs(path.closest(x, y)[3])) < 0.05
+
+
 if __name__ == "__main__":
     failed = 0
     for fn in TESTS:

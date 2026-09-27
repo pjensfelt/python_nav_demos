@@ -22,7 +22,7 @@ class Tunable:
     ladder: List[float]
     default: int
     unit: str = ""    # shown after the number; 'deg' and 'deg/s2' are stored in rad
-    law: str = None   # only relevant for this control law (None = always)
+    laws: tuple = None  # only relevant for these control laws (None = always)
 
     def format(self, value):
         if np.isinf(value):
@@ -38,7 +38,7 @@ def _deg(values):
     return [np.deg2rad(v) for v in values]
 
 
-_LOOKAHEAD = [0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5]
+_LOOKAHEAD = [0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5]
 _VMAX = [0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0]
 _KP = [0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0]
 _SIGMA_DEG = [10, 20, 30, 60, 90]
@@ -47,18 +47,29 @@ _ACCW_DEG = [90, 180, 360, 720, 1800, 3600]
 _CTRL_DT = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
 _TIME_SCALE = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0]
 
+# Localization jitter (see Follower.localize): its size in position and
+# heading, drawn anew at every control step.
+_LOC_XY = [0.0, 0.01, 0.02, 0.05, 0.1, 0.2]
+_LOC_TH_DEG = [0, 1, 2, 5, 10]
+LOC_TUNABLES = [
+    Tunable("loc_xy", "loc_xy", _LOC_XY, 0, "m"),
+    Tunable("loc_th", "loc_th", [np.deg2rad(v) for v in _LOC_TH_DEG], 0, "deg"),
+]
+
 # Display order is also the order tab walks through.
 TUNABLES: List[Tunable] = [
-    Tunable("lookahead", "lookahd", _LOOKAHEAD, _LOOKAHEAD.index(0.1), "m"),
+    Tunable("lookahead", "lookahd", _LOOKAHEAD, _LOOKAHEAD.index(0.1), "m",
+            laws=("heading-P", "pure pursuit")),
     Tunable("vmax", "v_max", _VMAX, _VMAX.index(1.0), "m/s"),
-    Tunable("kp", "kP", _KP, _KP.index(10.0), "/s", law="heading-P"),
+    Tunable("kp", "kP", _KP, _KP.index(10.0), "/s", laws=("heading-P",)),
     # Speed reduction with heading error; 'off' = always drive at v_max.
-    Tunable("sigma", "slowdn", _deg(_SIGMA_DEG) + [np.inf], _SIGMA_DEG.index(60), "deg"),
+    Tunable("sigma", "slowdn", _deg(_SIGMA_DEG) + [np.inf], _SIGMA_DEG.index(60), "deg",
+            laws=("heading-P", "pure pursuit")),
     Tunable("accv", "acc_v", _ACCV, _ACCV.index(2.0), "m/s²"),
     Tunable("accw", "acc_w", _deg(_ACCW_DEG) + [np.inf], _ACCW_DEG.index(3600), "deg/s2"),
     Tunable("ctrl_dt", "ctrl_dt", _CTRL_DT, _CTRL_DT.index(0.01), "s"),
     Tunable("time_scale", "speed", _TIME_SCALE, _TIME_SCALE.index(1.0), "x"),
-]
+] + LOC_TUNABLES
 TUNABLE_BY_NAME = {t.name: t for t in TUNABLES}
 
 
@@ -102,6 +113,20 @@ class DemoState:
             return
         finite = np.where(np.isinf(ladder), np.nan, ladder)
         self.idx[name] = int(np.nanargmin(np.abs(finite - value)))
+
+    def relevant(self, t):
+        """Does the selected control law use this tunable? The others are
+        hidden (their rows left blank) and skipped by tab."""
+        return t.laws is None or self.law in t.laws
+
+    def move_cursor(self, delta):
+        """Tab / shift-tab: on to the next row the current law uses."""
+        n = len(TUNABLES)
+        for i in range(1, n + 1):
+            c = (self.cursor + delta * i) % n
+            if self.relevant(TUNABLES[c]):
+                self.cursor = c
+                return
 
     @property
     def selected(self):

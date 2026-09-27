@@ -56,12 +56,22 @@ what was decided and why, and what comes next.
 
 ## Latest changes
 
-Everything is committed and pushed. The last two changes (tested, all tests
-pass):
-- the **stop and turn** control law (in `navdemo/sim.py`, so in both the
-  planning and the pure pursuit demo);
-- the **execution toggle `e`** in the planning demo (search display moved from
-  `e` to `y`), with README updates.
+Everything is committed and pushed (tested, all tests pass). Since the
+first version of this file (2026-09-27):
+- **`s` shortcuts the existing plan** in the planning demo (no new search;
+  `s` again restores it; only before driving), and a red **COLLISION**
+  label above the robot;
+- **localization jitter** (`loc_xy`, `loc_th`) in both demos: fresh
+  Gaussian noise on the pose the controller uses at every control step, no
+  drift (Patric: drift would be too hard to handle). The estimate is drawn
+  as a dashed purple robot. Stop and turn now counts a corner as reached
+  when it has got that far along the leg, so it copes with jitter up to
+  about 5 cm;
+- **lookaheads down to 1 cm** (1, 3, 5, 7 cm) in both demos, to show
+  absurdly small values;
+- the pure pursuit demo **hides the rows the control law doesn't use**
+  (blank gaps keep the layout; tab skips them), and takes
+  `--law stop-and-turn`; the planning demo's `--set` takes angles in degrees.
 Check `git -C python_nav_demos status` when resuming anyway.
 
 ## Decisions and preferences to keep (why the demos look the way they do)

@@ -308,14 +308,32 @@ w = kP·aErr doesn't depend on v.
 
 | row | meaning | default |
 |---|---|---|
-| `lookahd` | lookahead distance | 0.1 m |
+| `lookahd` | lookahead distance (not for stop and turn) | 0.1 m |
 | `v_max` | top speed | 1 m/s |
-| `kP` | heading gain (heading-P only; shows `(unused)` otherwise) | 10 /s |
-| `slowdn` | sigma of the slow-down with heading error; `off` = always `v_max` | 60° |
+| `kP` | heading gain (heading-P only) | 10 /s |
+| `slowdn` | sigma of the slow-down with heading error; `off` = always `v_max` (not for stop and turn) | 60° |
 | `acc_v` | translational acceleration limit | 2 m/s² |
 | `acc_w` | rotational acceleration limit | 3600 °/s² |
 | `ctrl_dt` | control period (physics always runs at 1 ms) | 0.01 s |
 | `speed` | simulation speed vs wall clock, for slow motion | 1x |
+| `loc_xy` | localization jitter in position (std, x and y) | 0 m |
+| `loc_th` | localization jitter in heading (std) | 0° |
+
+Rows the selected control law doesn't use are hidden, leaving a gap so the
+other rows stay put, and `tab` steps over them. The lookahead goes down to
+1 cm, which no one would use. On path 2 pure pursuit needs 61 s instead of
+9 s at 5 cm (cross-track error up to 0.6 m) and never gets there at 3 cm;
+heading-P holds on longer (23 s at 3 cm) but never gets there at 1 cm.
+
+**Localization jitter** (`loc_xy`, `loc_th`): the controller no longer gets
+the true pose but the true pose plus a new, independent Gaussian error at
+every control step (`Follower.localize`). There is no drift, so the estimate
+is right on average. The pose the controller believes in is drawn as a
+dashed purple robot, and the lookahead geometry is drawn from it, since
+that is what the controller sees. The cross-track error `e` and its chart
+stay the true ones. With 5 cm jitter on path 2 the `w` chart turns noisy
+and the robot stops 4 cm from the goal instead of 0.3 cm (10 cm: 17 cm),
+because it also judges where the goal is from the noisy pose.
 
 **Difference from the MATLAB demo:** `pure_pursuit.m` integrated the heading
 with `a = a + w*dt` inside its physics sub-step loop, using the control
@@ -343,6 +361,9 @@ Things to try:
   oscillates.
 * `slowdn` off: the robot takes corners at full speed.
 * `d` a few times to see how each law recovers from being knocked off the path.
+* `loc_xy` to 5–10 cm with a short lookahead (0.1 m): the jitter goes
+  straight into `w`. A longer lookahead averages it out, since a position
+  error then changes the direction to the target point much less.
 
 ### Paths
 
@@ -377,7 +398,7 @@ did. The robot restarts at its first point. `w` saves the current path to
 ```
 
 `--set` takes any parameter name (`lookahead`, `vmax`, `kp`, `sigma`,
-`accv`, `accw`, `ctrl_dt`, `time_scale`), with angles in degrees and `inf`
+`accv`, `accw`, `ctrl_dt`, `time_scale`, `loc_xy`, `loc_th`), with angles in degrees and `inf`
 for unlimited/off. `--theta0` sets the starting heading in degrees, and `--turn-in-place` starts with `b` on. The robot
 always starts at the path's first point.
 
@@ -497,7 +518,17 @@ corner (the panel counts the stops). On an A\* path, with a corner at almost
 every cell, that roughly doubles the time: 34 s instead of 18 s in world 1.
 Shortcutting the path before driving (`s`) removes most of the corners (21 s). The
 robot is checked against the real geometry every 20 ms, and stops, red, on
-contact.
+contact, with COLLISION written above it.
+
+`loc_xy` and `loc_th` add **localization jitter**, as in `run_pure_pursuit.py`:
+the controller sees the true pose plus a fresh Gaussian error at every
+control step, drawn as a dashed purple robot. Pure pursuit and heading-P
+barely notice 10 cm and 5° in world 1 (18.4 s instead of 18.2 s with pure
+pursuit). Stop and turn, which tries to stop within 2 cm of every corner
+and face the next one within 1°, suffers: 34 s without jitter, anything from
+40 s to 3 minutes with 5 cm (it waits for a lucky pose at each corner), and
+with 10 cm it never gets going. Exact path following needs
+exact localization.
 
 ### Things to try
 

@@ -66,7 +66,10 @@ def main():
         if name not in TUNABLE_BY_NAME:
             raise SystemExit(f"--set: unknown tunable {name!r}, expected one of "
                              + ", ".join(TUNABLE_BY_NAME))
-        state.set_value(name, float(raw))
+        value = float(raw)
+        if TUNABLE_BY_NAME[name].unit.startswith("deg"):
+            value = np.deg2rad(value)          # angles in degrees, as in run_pure_pursuit.py
+        state.set_value(name, value)
     if args.world in [str(i + 1) for i in range(len(worlds))]:
         base = worlds[int(args.world) - 1]
     else:
@@ -145,6 +148,7 @@ def main():
         (start_mark,) = ax.plot([], [], "o", color="k", mfc="none", ms=8, zorder=7)
         (goal_mark,) = ax.plot([], [], "*", color="gold", mec="k", ms=16, zorder=9)
         robot = draw.RobotArtist(ax)
+        estimate = draw.EstimateArtist(ax)
         crash_text = ax.text(0, 0, "COLLISION", color="r", fontsize=14, fontweight="bold",
                              ha="center", va="bottom", zorder=10, visible=False)
         lookahead = draw.GeometryArtist(ax)
@@ -304,6 +308,10 @@ def main():
         for h in robot.artists:
             h.set_color("r" if mission.collided else "k")
             h.set_visible(state.execute)
+        if mission.follower is not None:
+            estimate.set(mission.follower, state.execute)
+        else:
+            estimate.set_visible(False)
         crash_text.set_position((mission.robot.x, mission.robot.y + 2.5 * ROBOT_RADIUS))
         crash_text.set_visible(mission.collided and state.execute)
         if (mission.follower is not None and state.execute and state.show_lookahead

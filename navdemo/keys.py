@@ -76,6 +76,8 @@ def make_handler(state: DemoState, fig=None, ax=None, demo="purepursuit"):
         elif k == "c":
             i = (CONTROL_LAWS.index(state.law) + 1) % len(CONTROL_LAWS)
             state.law = CONTROL_LAWS[i]
+            if not state.relevant(state.selected):
+                state.move_cursor(+1)
         elif k == "b":
             state.turnInPlace = not state.turnInPlace
         elif k in "1234":
@@ -87,10 +89,10 @@ def make_handler(state: DemoState, fig=None, ax=None, demo="purepursuit"):
         elif k == "t":
             state.showTrail = not state.showTrail
         elif k == "tab":
-            state.cursor = (state.cursor + 1) % len(TUNABLES)
+            state.move_cursor(+1)
         elif "tab" in k.lower():
             # shift-tab's name is backend dependent ("shift+tab", "backtab")
-            state.cursor = (state.cursor - 1) % len(TUNABLES)
+            state.move_cursor(-1)
         elif k == ">":
             state.step(state.selected.name, +1)
         elif k == "<":

@@ -9,7 +9,7 @@ from typing import List
 
 import numpy as np
 
-from .params import Tunable
+from .params import LOC_TUNABLES, Tunable
 from .planners import PLANNERS
 from .sim import CONTROL_LAWS
 
@@ -26,7 +26,7 @@ _ITER = [100, 250, 500, 1000, 2000, 5000, 10000]
 _STEP = [0.1, 0.25, 0.5, 1.0, 2.0]
 _BIAS = [0.0, 0.05, 0.1, 0.2, 0.5]
 _RADIUS = [0.5, 1.0, 1.5, 2.0, 3.0]
-_LOOKAHEAD = [0.1, 0.2, 0.3, 0.5, 0.75, 1.0]
+_LOOKAHEAD = [0.01, 0.03, 0.05, 0.07, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0]
 _VMAX = [0.25, 0.5, 1.0, 1.5, 2.0]
 _KP = [1.0, 2.0, 5.0, 10.0, 20.0]
 _TIME_SCALE = [0.25, 0.5, 1.0, 2.0, 4.0]
@@ -71,7 +71,7 @@ TUNABLES: List[Tunable] = [
     Tunable("vmax", "v_max", _VMAX, _VMAX.index(1.0), "m/s"),
     Tunable("kp", "kP", _KP, _KP.index(10.0), "/s"),
     Tunable("time_scale", "speed", _TIME_SCALE, _TIME_SCALE.index(1.0), "x"),
-]
+] + LOC_TUNABLES
 TUNABLE_BY_NAME = {t.name: t for t in TUNABLES}
 
 # Which planner each planner parameter belongs to; anything not listed is
@@ -142,7 +142,7 @@ class PlanState:
         self.idx[name] = int(np.argmin(np.abs(ladder - value)))
 
     def relevant(self, t):
-        if t.name in ("lookahead", "vmax", "kp", "time_scale") and not self.execute:
+        if t.name in ("lookahead", "vmax", "kp", "time_scale", "loc_xy", "loc_th") and not self.execute:
             return False
         if t.name == "lookahead":
             return self.law != "stop and turn"

@@ -150,9 +150,10 @@ class Follower:
 
     LOG_DT = 0.01  # s between logged samples
 
-    def __init__(self, path, robot):
+    def __init__(self, path, robot, rng=None):
         self.path = path
         self.robot = robot
+        self.rng = rng if rng is not None else np.random.default_rng()
         self.reset()
 
     def reset(self):
@@ -176,6 +177,9 @@ class Follower:
         self._corner = 0
         self._turning = True
         self.stops = 0
+        # localization jitter: the controller sees est = true pose + err
+        self.err = np.zeros(3)
+        self.est = self.robot.pose
 
     def set_path(self, path):
         self.path = path
@@ -185,14 +189,30 @@ class Follower:
     def max_abs_e(self):
         return max((abs(e) for e in self.log_e), default=0.0)
 
+    def localize(self, p):
+        """The pose the controller gets: the true pose plus localization
+        jitter -- a new, independent Gaussian error in x, y (world frame)
+        and heading at every control step, with standard deviations loc_xy
+        and loc_th. No drift: the estimate is right on average.
+        """
+        sig = np.array([p.get("loc_xy", 0.0), p.get("loc_xy", 0.0), p.get("loc_th", 0.0)])
+        self.err = sig * self.rng.standard_normal(3)
+        x, y, a = self.robot.pose
+        self.est = (x + self.err[0], y + self.err[1], wrap_angle(a + self.err[2]))
+        return self.est
+
     def control(self, p):
         """One controller update: find where we are on the path, pick the
-        lookahead point, compute vRef/wRef."""
-        x, y, _ = self.robot.pose
-        xc, yc, s, e = self.path.closest(x, y, s_min=self.s,
-                                         window=p["lookahead"] + self.SEARCH_WINDOW)
+        lookahead point, compute vRef/wRef. Everything here uses the pose
+        estimate; only the logged cross-track error e is the true one."""
+        x, y, _ = self.localize(p)
+        window = p["lookahead"] + self.SEARCH_WINDOW
+        xc, yc, s, e = self.path.closest(x, y, s_min=self.s, window=window)
         self.s, self.e = s, e
         self.closest_pt = np.array([xc, yc])
+        if self.err.any():
+            self.e = self.path.closest(self.robot.x, self.robot.y,
+                                       s_min=max(s - window, 0.0), window=2 * window)[3]
 
         # Stop once the closest point is the end of the path -- the MATLAB
         # demo's "index == length(Xp)" test.
@@ -209,11 +229,11 @@ class Follower:
         self.target = self.path.point_at(s + p["lookahead"])
         if p["law"] == "pure pursuit":
             self.vRef, self.wRef, self.aErr = control_pure_pursuit(
-                self.robot.pose, self.target, p["vmax"], p["sigma"],
+                self.est, self.target, p["vmax"], p["sigma"],
                 p.get("turn_in_place", False))
         else:
             self.vRef, self.wRef, self.aErr = control_heading(
-                self.robot.pose, self.target, p["vmax"], p["kp"], p["sigma"])
+                self.est, self.target, p["vmax"], p["kp"], p["sigma"])
         self.brake_for_goal(p)
 
     def stop_and_turn(self, p):
@@ -225,15 +245,24 @@ class Follower:
         planner has a corner at almost every cell. That is what pure pursuit
         (or smoothing the path first) is for.
         """
-        x, y, a = self.robot.pose
-        corner = self.path.xy[self._corners[self._corner]]
-        self.target = corner
-        dx, dy = corner[0] - x, corner[1] - y
-        dist = np.hypot(dx, dy)
+        x, y, a = self.est
         a_brake = self.BRAKE_FRACTION * p["accv"]
         w_brake = self.BRAKE_FRACTION * p["accw"]
 
-        if not self._turning and dist < AT_CORNER and abs(self.robot.v) < 0.05:
+        def leg(k):
+            """Corner k, the unit direction of the leg that ends there, and
+            how far the (estimated) robot still has to go along that leg --
+            along it rather than straight to the corner, so that a noisy
+            pose passing a hair beside the corner still counts as there."""
+            corner = self.path.xy[self._corners[k]]
+            prev = self.path.xy[self._corners[k - 1] if k > 0 else 0]
+            u = corner - prev
+            u = u / max(np.hypot(*u), 1e-9)
+            return corner, u, (corner[0] - x) * u[0] + (corner[1] - y) * u[1]
+
+        corner, u, ahead = leg(self._corner)
+        self.target = corner
+        if not self._turning and ahead < AT_CORNER and abs(self.robot.v) < 0.05:
             # arrived: on to the next corner, turning first
             if self._corner == len(self._corners) - 1:
                 self.done, self.t_done = True, self.t     # the last corner is the goal
@@ -242,12 +271,18 @@ class Follower:
             self._corner += 1
             self._turning = True
             self.stops += 1
-            corner = self.path.xy[self._corners[self._corner]]
-            dx, dy = corner[0] - x, corner[1] - y
-            dist = np.hypot(dx, dy)
+            corner, u, ahead = leg(self._corner)
+            self.target = corner
 
-        err = wrap_angle(np.arctan2(dy, dx) - a)
+        dx, dy = corner[0] - x, corner[1] - y
+        # Aim at the corner; close to it (where a small position error
+        # swings the direction to it wildly) hold the leg's direction.
+        near = np.hypot(dx, dy) < 5 * AT_CORNER
+        aim = np.arctan2(u[1], u[0]) if near else np.arctan2(dy, dx)
+        err = wrap_angle(aim - a)
         self.aErr = err
+        if not self._turning and not near and abs(err) > np.deg2rad(30):
+            self._turning = True       # knocked off the line: stop and face the corner again
         if self._turning:
             if abs(err) < FACING and abs(self.robot.w) < np.deg2rad(5):
                 self._turning = False
@@ -259,7 +294,7 @@ class Follower:
         # straight to the corner, braking so as to stop on it
         v = p["vmax"]
         if not np.isinf(p["accv"]):
-            v = min(v, np.sqrt(2 * a_brake * dist))
+            v = min(v, np.sqrt(2 * a_brake * max(ahead, 0.0)))
         self.vRef = v
         self.wRef = 2.0 * err          # a small correction to stay on the line
 

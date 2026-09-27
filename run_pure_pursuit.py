@@ -39,7 +39,7 @@ def main():
         return Robot(*path.start, theta0)
 
     path = load_path(args.path, paths)
-    follower = Follower(path, make_robot(path))
+    follower = Follower(path, make_robot(path), rng)
 
     fig = None
     if not args.headless:
@@ -51,6 +51,7 @@ def main():
         (trail,) = ax.plot([], [], color="r", lw=1, alpha=0.8, zorder=3)
         (goal,) = ax.plot([], [], "s", color="C0", ms=6, mfc="none", zorder=3)
         robot = draw.RobotArtist(ax)
+        estimate = draw.EstimateArtist(ax)
         geometry = draw.GeometryArtist(ax)
         charts = draw.StripCharts(fig)
         panel = draw.Panel(fig)
@@ -95,10 +96,11 @@ def main():
         trail.set_visible(state.showTrail)
         trail.set_data(*zip(*follower.trail))
         robot.set_pose(*follower.robot.pose)
+        estimate.set(follower)
         geometry.set(follower, p["lookahead"], state.showGeometry)
         charts.set(follower)
         panel.update(state, follower)
-        return ([path_line, trail, goal] + robot.artists + geometry.artists
+        return ([path_line, trail, goal] + robot.artists + estimate.artists + geometry.artists
                 + charts.artists + panel.artists + drawer.artists)
 
     app.run(fig, state, step, args.headless, args.steps, args.snapshot,

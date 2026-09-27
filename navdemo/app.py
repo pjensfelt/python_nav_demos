@@ -48,7 +48,7 @@ def common_args(description):
                          "or a CSV of x,y waypoints")
     ap.add_argument("--theta0", type=float, default=0.0,
                     help="robot's starting heading [deg]; it always starts at the path's first point")
-    ap.add_argument("--law", choices=["heading-P", "pure-pursuit"], default="heading-P",
+    ap.add_argument("--law", choices=["heading-P", "pure-pursuit", "stop-and-turn"], default="heading-P",
                     help="control law to start with ('c' toggles)")
     ap.add_argument("--turn-in-place", action="store_true",
                     help="pure pursuit law: turn on the spot when the target is behind ('b' toggles)")
@@ -60,7 +60,9 @@ def common_args(description):
 
 
 def apply_common_args(state, args):
-    state.law = {"heading-P": "heading-P", "pure-pursuit": "pure pursuit"}[args.law]
+    state.law = args.law if args.law == "heading-P" else args.law.replace("-", " ")
+    if not state.relevant(state.selected):
+        state.move_cursor(+1)
     for item in args.set:
         name, _, raw = item.partition("=")
         if name not in TUNABLE_BY_NAME:

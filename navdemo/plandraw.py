@@ -236,6 +236,7 @@ def add_legend(fig):
         Line2D([], [], color="0.4", lw=1, ls="--", label="earlier plans"),
         Line2D([], [], color="C3", lw=1.2, ls="--", label="grown obstacle (exact checks)"),
         Line2D([], [], color="r", lw=1, label="driven"),
+        Line2D([], [], color="tab:purple", lw=1.5, ls="--", label="pose estimate (loc. jitter)"),
     ]
     fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.01, 0.02),
                fontsize=7, frameon=False, ncol=1)

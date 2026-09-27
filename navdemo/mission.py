@@ -144,7 +144,7 @@ class Mission:
         r = self.robot
         v, w = r.v, r.w
         robot = Robot(*r.pose)
-        self.follower = Follower(Path(self.path, name="plan"), robot)
+        self.follower = Follower(Path(self.path, name="plan"), robot, self.rng)
         robot.v, robot.w = v, w
         self.robot = robot
 
