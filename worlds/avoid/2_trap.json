@@ -1,0 +1,14 @@
+{
+  "name": "trap",
+  "comment": "A U-shaped trap open towards the start: the classic local minimum. Click the goal behind it, then try the A* carrot.",
+  "bounds": [0, 10, 0, 10],
+  "start": [1.5, 5, 0],
+  "goal": [9, 5],
+  "obstacles": [
+    {"type": "wall", "from": [6.5, 2.5], "to": [6.5, 7.5], "thickness": 0.15},
+    {"type": "wall", "from": [4.0, 2.5], "to": [6.5, 2.5], "thickness": 0.15},
+    {"type": "wall", "from": [4.0, 7.5], "to": [6.5, 7.5], "thickness": 0.15}
+  ],
+  "unmapped": [],
+  "movers": []
+}

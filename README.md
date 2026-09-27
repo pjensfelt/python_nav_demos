@@ -3,8 +3,10 @@
 Navigation demos used during lectures: how the real world turns into a grid
 (and how much that grid depends on where the cell borders fall), following a
 path (pure pursuit, a Python port of the MATLAB `matlab_pure_pursuit` demo),
-and planning a path on a grid made from the real world, then driving it
-there (A*, RRT, RRT*, with a known map or one built as the robot goes). They share their window
+planning a path on a grid made from the real world, then driving it
+there (A*, RRT, RRT*, a potential field, with a known map or one built as
+the robot goes), and obstacle avoidance with only the lidar (potential
+field, DWA, VFH) among people and things the map doesn't know about. They share their window
 layout and keyboard conventions with the localization/SLAM demos in
 [python_loc_demos](https://github.com/pjensfelt/python_loc_demo).
 
@@ -23,9 +25,11 @@ python3 -m venv .venv
 .venv/bin/python run_grid.py                    # the real world and its grid
 .venv/bin/python run_pure_pursuit.py            # pure pursuit path following
 .venv/bin/python run_planning.py                # plan on a grid, drive in the real world
+.venv/bin/python run_avoid.py                   # obstacle avoidance with the lidar
 .venv/bin/python tests/test_grid.py             # checks (grid)
 .venv/bin/python tests/test_navdemo.py          # checks (pure pursuit)
-.venv/bin/python tests/test_planning.py         # checks (planning, ~30 s)
+.venv/bin/python tests/test_planning.py         # checks (planning, a few minutes)
+.venv/bin/python tests/test_avoid.py            # checks (obstacle avoidance, ~1 min)
 ```
 
 The figure window has to have keyboard focus for the keys to work. Press `h`
@@ -669,12 +673,148 @@ this smoothing, as `s`),
 name order. The format is described at the top of `navdemo/world.py`.
 `--world FILE.json` loads your own.
 
+## Obstacle avoidance (`run_avoid.py`)
+
+Local, reactive methods: each control step (10 Hz) they turn the latest
+lidar scan and a goal into speed commands, with no map and no memory. The
+robot then follows the commands as far as its acceleration limits allow.
+
+The worlds (`worlds/avoid/`, keys `1`…`4`) have three kinds of obstacle:
+the ones **in the map** (grey), ones that are real but **not in the map**
+(brown, dashed: a box someone left, a moved chair), and **people** (orange),
+who walk back and forth along a path (dotted), some pausing at the ends.
+The lidar sees all of them; the map only the first kind.
+
+- **corridor:** a 3 m corridor with a box and a chair that aren't in the
+  map, and two people walking towards the robot.
+- **trap:** a U-shaped wall open towards the start, with the goal behind
+  it. The classic local minimum.
+- **office:** four rooms with 1 m doors, a trolley and a chair that aren't
+  in the map, someone walking through a door, and someone who stands in a
+  doorway for 8 s and then leaves.
+- **hall:** an open hall with four pillars and four people crossing it.
+
+### The goal (`m`)
+
+- **Clicked goal** (the default): you are the global planner. The method
+  heads straight for the goal you click (left button; the right button
+  moves the start).
+- **A\* carrot**: A\* plans on the map (0.1 m cells, inflated by the robot
+  radius + 0.1 m), which knows nothing about the unmapped obstacles or the
+  people. The method heads for a point `carrot` metres ahead of the robot
+  along that path. The map is shown faded (`g`), the path in blue, the
+  carrot as a blue dot. This is how real systems are built: the global
+  planner decides where to go, the local method deals with what the map
+  doesn't have.
+
+### The methods (`c`)
+
+All three drive the same robot: `v_max`, `w_max`, `acc_v` and `acc_w` are
+its limits whatever the method. `a` shows each method's own picture.
+
+- **VFH** is the default; `c` cycles VFH → potential field → DWA.
+- **Potential field:** the goal pulls (strength 1, less within 1 m of it),
+  every lidar hit within `d0` pushes, `k_rep` · (1/ρ − 1/`d0`) / ρ² with ρ the
+  gap between the robot's edge and the hit, weighted by the stretch of
+  surface each ray stands for, so the number of rays doesn't change it.
+  It steers along the sum (turn towards it, slow down the further off it
+  is). It knows nothing about the robot's dynamics. The picture: the pull
+  (green), the push (red) and their sum (black).
+- **DWA** (dynamic window approach, Fox, Burgard & Thrun 1997): the window
+  is the (v, w) the robot can reach within one control period. For each of
+  7 × 15 candidates it works out how far the robot can drive along that
+  curve before coming within its radius + 0.1 m of a hit. A candidate is
+  admissible if the robot can still stop in that distance, counting the
+  control period it drives on before it can react:
+  v·dt + v²/(2·`acc_v`) ≤ distance. The admissible ones are scored
+  `w_head` · (heading towards the goal after `horizon` s) + `w_clear` ·
+  (free distance / 3 m) + `w_vel` · (v / `v_max`), and the best is sent. If
+  none is admissible it stops and turns towards the goal. The picture:
+  every candidate's `horizon`-second arc, grey if admissible, red if not,
+  the chosen one green.
+- **VFH** (vector field histogram, Borenstein & Koren 1991, simplified):
+  hits within `vfh_win` (or less near the goal) go into a polar histogram
+  of 5° sectors, more the closer they are, each spread over the sectors
+  the robot would sweep passing it at a safe distance. Sectors below
+  `vfh_thr` are free. It heads for the free sector closest to the goal's
+  direction that is at least 10° from any blocked one. The picture: the
+  histogram as bars round the robot (green free, red blocked), the goal's
+  direction dashed and the chosen one blue.
+
+### People
+
+By default people **wait** when the robot is in their way, and after 2 s
+give way and walk back, as people do. Without that, a robot and a person
+meeting in a doorway would wait for each other for ever. `w` makes them
+**walk blindly** instead, straight through the robot, which none of the
+methods can avoid when it happens from the side or behind: they all assume
+the world stands still between scans. `people` scales their speed (0 =
+they stand still), and `p` takes them out of the world altogether.
+
+### Measured
+
+The worlds as drawn, 90 s at most:
+
+| world | goal | potential field | DWA | VFH |
+|---|---|---|---|---|
+| corridor | clicked | 32 s (grazes, 0.00 m) | 58 s | 51 s |
+| corridor | A\* carrot | hits a person | 45 s | 53 s |
+| trap | clicked | stuck | stuck | stuck |
+| trap | A\* carrot | 16 s | 20 s | 15 s |
+| office | clicked | stuck | stuck | stuck |
+| office | A\* carrot | stuck by the trolley | 72 s | 33 s |
+| hall | clicked | hits the first pillar | 16 s | 17 s |
+| hall | A\* carrot | 17 s | 21 s | 17 s |
+
+- **Local methods can't solve global problems:** with a clicked goal
+  behind the trap, or in another room of the office, every method gets
+  stuck. With the A\* carrot every method gets out of the trap.
+- **The potential field ignores the dynamics:** in the hall the first
+  pillar lies exactly between the start and the goal. The push only
+  overcomes the pull when the robot is close, and by then it is going too
+  fast to stop.
+- **DWA and VFH with a carrot get through every world,** people and
+  unmapped obstacles included.
+- VFH's threshold matters: with the carrot and `vfh_thr` 1 it can't get through the
+  office doors (the jambs block every direction), with 2 (the default) it
+  can.
+
+### Keys
+
+| key | action | key | action |
+|---|---|---|---|
+| `space` | drive / pause | `o` | obstacles |
+| `r` | reset | `d` | lidar hits |
+| `c` | method | `a` | the method's picture |
+| `m` | clicked goal / A\* carrot | `t` | driven trail |
+| `w` | people wait / walk blindly | `g` | the map (A\* carrot) |
+| `p` | people on / off | | |
+| `1`…`4` | world | `S` | screenshot |
+| left / right click | goal / start | `h` | help |
+| `tab` / `shift-tab` | select a parameter | `q` | quit |
+| `>` / `<` | change it | | |
+
+### Command line
+
+```sh
+.venv/bin/python run_avoid.py --world 2 --method DWA              # the trap
+.venv/bin/python run_avoid.py --world 3 --method VFH --goal carrot
+.venv/bin/python run_avoid.py --headless --world 4 --method potential-field
+```
+
+`--set` takes any row name (`vmax`, `wmax`, `accv`, `accw`, `sensor_range`,
+`rays`, `people`, `carrot`, `k_rep`, `d0`, `horizon`, `w_head`, `w_clear`,
+`w_vel`, `vfh_win`, `vfh_thr`, `time_scale`), with angles in degrees.
+Other options are `--blind`, `--no-people`, `--seed N`, `--snapshot FILE.png` and
+`--steps N`.
+
 ## Layout
 
 ```
 run_grid.py            grid demo
 run_pure_pursuit.py    pure pursuit demo
 run_planning.py        planning demo
+run_avoid.py           obstacle avoidance demo
 navdemo/path.py        path geometry: closest point, lookahead point (find_closest_point.m, get_lookahead_point.m)
 navdemo/sim.py         robot with acceleration limits, the two control laws, the follower loop
 navdemo/params.py      pure pursuit parameter ladders and state
@@ -687,13 +827,18 @@ navdemo/rasterize.py   grid demo cells: exact any overlap, samples, center; infl
 navdemo/gridstate.py   grid demo parameters, state, keys and mouse
 navdemo/griddraw.py    grid demo drawing: cells, obstacles, probes, panel
 navdemo/mapping.py     lidar and the grid that is built as the robot goes
-navdemo/planners.py    A*, RRT, RRT*, shortcutting
+navdemo/planners.py    A*, RRT, RRT*, potential field, shortcutting, splines
 navdemo/mission.py     plan -> drive -> sense -> replan, collisions with the real world
 navdemo/planstate.py   planning parameter ladders and state
 navdemo/plandraw.py    planning drawing: obstacles, grid, search, scan, panel
 navdemo/plankeys.py    planning keyboard and mouse
+navdemo/avoid.py       avoidance: worlds with unmapped obstacles and people, the methods, the loop
+navdemo/avoidstate.py  avoidance parameter ladders and state
+navdemo/avoiddraw.py   avoidance drawing: people, forces, DWA arcs, VFH histogram, panel
+navdemo/avoidkeys.py   avoidance keyboard and mouse
 paths/                 path1..4.csv from the MATLAB demo, plus any you save
 worlds/                world files for run_planning.py
 worlds/grid/           world files made for run_grid.py
+worlds/avoid/          world files for run_avoid.py (with "unmapped" and "movers")
 tests/                 checks, no framework needed
 ```

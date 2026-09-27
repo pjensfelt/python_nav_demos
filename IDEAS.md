@@ -181,6 +181,9 @@ Still open for the planning demo:
    probability. This is where the area-fraction idea dropped from the grid
    demo belongs.
 2. **Reactive local planners (slides 26–33): potential field, VFH, DWA.**
+   Done 2026-09-27 as a separate demo, `run_avoid.py` (clicked goal or A*
+   carrot; people and obstacles the map doesn't know about). Next there: a
+   local map (see "Local maps that forget").
    A second choice of executor next to pure pursuit, following the global
    plan's carrot or heading straight for the goal. The bug-trap world
    already shows potential-field local minima. DWA fits especially well:

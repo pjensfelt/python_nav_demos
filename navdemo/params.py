@@ -29,6 +29,8 @@ class Tunable:
             return "∞" if self.name != "sigma" else "off"
         if self.unit == "deg":
             return f"{np.rad2deg(value):.4g}°"
+        if self.unit == "deg/s":
+            return f"{np.rad2deg(value):.4g}°/s"
         if self.unit == "deg/s2":
             return f"{np.rad2deg(value):.4g}°/s²"
         return f"{value:.3g}{self.unit}"

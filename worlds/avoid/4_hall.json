@@ -1,0 +1,20 @@
+{
+  "name": "hall",
+  "comment": "An open hall with four pillars and four people crossing it.",
+  "bounds": [0, 10, 0, 10],
+  "start": [1, 1, 45],
+  "goal": [9, 9],
+  "obstacles": [
+    {"type": "circle", "center": [3, 3], "radius": 0.35},
+    {"type": "circle", "center": [3, 7], "radius": 0.35},
+    {"type": "circle", "center": [7, 3], "radius": 0.35},
+    {"type": "circle", "center": [7, 7], "radius": 0.35}
+  ],
+  "unmapped": [],
+  "movers": [
+    {"radius": 0.25, "path": [[1, 5], [9, 5]], "speed": 0.9, "pause": 1.0},
+    {"radius": 0.25, "path": [[5, 1], [5, 9]], "speed": 0.7, "pause": 1.0, "phase": 3.0},
+    {"radius": 0.25, "path": [[2, 9], [9, 2]], "speed": 0.6, "pause": 1.0, "phase": 6.0},
+    {"radius": 0.25, "path": [[8.5, 6], [1.5, 6]], "speed": 0.8, "pause": 2.0, "phase": 1.0}
+  ]
+}

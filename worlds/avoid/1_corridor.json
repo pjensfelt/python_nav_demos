@@ -1,0 +1,75 @@
+{
+  "name": "corridor",
+  "comment": "A 3 m corridor: a box and a chair the map doesn't have, and two people walking towards the robot.",
+  "bounds": [
+    0,
+    14,
+    0,
+    3
+  ],
+  "start": [
+    1,
+    1.5,
+    0
+  ],
+  "goal": [
+    13.3,
+    1.5
+  ],
+  "obstacles": [],
+  "unmapped": [
+    {
+      "type": "box",
+      "center": [
+        5,
+        1.1
+      ],
+      "size": [
+        0.6,
+        0.6
+      ],
+      "angle": 10
+    },
+    {
+      "type": "circle",
+      "center": [
+        9.5,
+        2.2
+      ],
+      "radius": 0.3
+    }
+  ],
+  "movers": [
+    {
+      "radius": 0.25,
+      "path": [
+        [
+          12.0,
+          2.0
+        ],
+        [
+          1.5,
+          2.0
+        ]
+      ],
+      "speed": 0.8,
+      "pause": 1.0
+    },
+    {
+      "radius": 0.25,
+      "path": [
+        [
+          12.0,
+          1.0
+        ],
+        [
+          6.5,
+          1.0
+        ]
+      ],
+      "speed": 0.6,
+      "pause": 2.0,
+      "phase": 4.0
+    }
+  ]
+}

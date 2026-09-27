@@ -24,7 +24,7 @@ what was decided and why, and what comes next.
   (66 slides). Patric's part is about the **real-world aspects** of
   navigation -- the students have already seen A*/RRT in known worlds.
 
-## The three demos (see README.md for details)
+## The four demos (see README.md for details)
 
 1. **`run_grid.py` -- the world and its grid.** Only the real world and its
    occupancy grid. Cell size, inflation (grid first by default, world first
@@ -52,7 +52,17 @@ what was decided and why, and what comes next.
    building, rotating the world under the grid (`,` `.` `k` `l`, `0`).
    **Execution is off at the start** (`e`): first the planner, then how to
    follow its path, with the three control laws (stop and turn shows why
-   pure pursuit or smoothing is needed). **Being worked on now.**
+   pure pursuit or smoothing is needed).
+4. **`run_avoid.py` -- obstacle avoidance with only the lidar** (built
+   2026-09-27). Kept separate from the planning demo,
+   which is full enough: this one is local and reactive, with things the map
+   doesn't have. Worlds in `worlds/avoid/` (corridor, trap, office, hall)
+   with obstacles in the map, obstacles NOT in the map, and people walking
+   back and forth (by default they wait for the robot and give way after
+   2 s; `w` makes them walk blindly, `p` takes them out). Methods (`c`):
+   VFH (the default), potential field, DWA, each with its own picture (`a`). Goal (`m`): clicked (you are the
+   global planner) or a carrot along an A* path on the map. The methods use
+   only the latest scan -- no local map yet (see next steps).
 
 ## Latest changes
 
@@ -139,13 +149,14 @@ From the list agreed when moving to the planning demo:
 ### The bigger ideas (details in IDEAS.md)
 
 In the order suggested, all waiting for a go-ahead and a design round:
-- **Local maps that forget + dynamic obstacles** (slides 35–38): map update
-  modes (last scan only / accumulate / clear along rays / decay), a person in
-  a doorway who leaves, a chair seen and then out of view. The two-layer map
-  already makes clearing possible (it only touches the map proper).
-- **Reactive local planners** (slides 26–33): VFH, DWA as executors next to
-  pure pursuit (a potential field exists now, but as a global planner on the
-  samples, not as an executor). DWA fits the simulator's acceleration limits.
+- **A local map for `run_avoid.py`, and maps that forget** (slides 35–38):
+  today each method sees only the latest scan (memoryless, 3 m range, so
+  e.g. what is behind the robot is forgotten at once). Next: a small rolling
+  grid round the robot (say 6 × 6 m) that accumulates scans, with the update
+  modes last scan only / accumulate / clear along rays / decay -- the office
+  already has the person in a doorway who leaves.
+- Done: reactive local planners (slides 26–33) as `run_avoid.py`: potential
+  field, DWA, VFH, with the A* carrot as the link to global planning.
 - Done: cost map for clearance (slides 13–15), localization jitter (slide 4
   idea), spline smoothing (a simpler form of slides 16–22).
 - **Emergency stop and what comes after it** (slides 39–40): protective vs
