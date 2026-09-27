@@ -41,6 +41,8 @@ def parse_args():
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                     help="preset a tunable, e.g. --set res=0.25 --set inflate=0.2. Names: "
                          + ", ".join(TUNABLE_BY_NAME))
+    ap.add_argument("--smooth", choices=["spline", "shortcut", "shortcut+spline"], default=None,
+                    help="start with this smoothing of every plan (as 's')")
     ap.add_argument("--seed", type=int, default=None, help="seed for RRT/RRT* and sensor noise")
     ap.add_argument("--headless", action="store_true",
                     help="no window: plan, drive to the goal (or a collision), print a summary")
@@ -140,6 +142,7 @@ def main():
         search = plandraw.SearchArtist(ax)
         scan_art = plandraw.ScanArtist(ax)
         cspace = plandraw.CSpaceArtist(ax)
+        potential = plandraw.PotentialArtist(ax)
         (sample_dots,) = ax.plot([], [], ".", color="tab:orange", ms=2, zorder=7)
         old_lines = []
         (raw_line,) = ax.plot([], [], ":", color="C0", lw=1, zorder=6)
@@ -152,7 +155,7 @@ def main():
         crash_text = ax.text(0, 0, "COLLISION", color="r", fontsize=14, fontweight="bold",
                              ha="center", va="bottom", zorder=10, visible=False)
         lookahead = draw.GeometryArtist(ax)
-        plandraw.add_legend(fig)
+        legend = plandraw.Legend(fig)
         panel = plandraw.Panel(fig)
         plankeys.connect(fig, state, ax)
         if not args.snapshot:
@@ -179,13 +182,16 @@ def main():
         start_replay(res, animate)
         print(f"{state.planner}: " + (f"path {res.cost:.2f} m" if res.path else res.message)
               + (f", {len(res.expanded)} cells expanded" if res.expanded else
-                 f", {len(res.nodes)} nodes" if res.nodes is not None else "")
+                 f", {res.iterations} steps" if (res.nodes is not None
+                                                 and state.planner == "potential field")
+                 else f", {len(res.nodes)} nodes" if res.nodes is not None else "")
               + f", {1000 * res.seconds:.0f} ms")
 
     cfg = state.mission_config()
+    spline_key = state.value("spline_spacing")
 
     def step(_frame=0):
-        nonlocal base, world, world_key, mission, grid_key, plan_key, cfg
+        nonlocal base, world, world_key, mission, grid_key, plan_key, cfg, spline_key
         cfg = state.mission_config()
 
         # ---- one-shot requests ----------------------------------------
@@ -223,18 +229,23 @@ def main():
             state.plan = False
             if not mission.driving:
                 do_plan(animate=True)
-        if state.shorten:
-            state.shorten = False
-            if replaying():
-                pass                          # let the search finish first
-            elif mission.driving or mission.t > 0:
-                print("s: shortcut the plan before driving it (r to reset)")
-            elif mission.shorten(cfg):
-                print(f"shortcut: {path_length(mission.path):.2f} m"
-                      f" (planned {mission.result.cost:.2f} m)" if mission.shortened
-                      else f"back to the plan as planned: {mission.result.cost:.2f} m")
+        if state.restyle:
+            # 's': a new smoothing mode, for this plan (from where the robot
+            # is, if it's on its way) and every plan after it
+            state.restyle = False
+            if mission.done or mission.collided:
+                print(f"smoothing: {state.path_mode} (for the next plan)")
+            elif mission.set_path_mode(state.path_mode, cfg):
+                k = mission.curvature
+                print(f"path {mission.path_mode}: {path_length(mission.path):.2f} m"
+                      + (f", max curvature {k:.1f} 1/m" if k else "")
+                      + (f" ({mission.path_note})" if mission.path_note else ""))
             else:
-                print("s: no path to shortcut (enter to plan)")
+                print(f"smoothing: {state.path_mode} (applied when you plan)")
+        if (mission.spline_spacing is not None and not (mission.done or mission.collided)
+                and spline_key != state.value("spline_spacing")):
+            mission.set_path_mode(mission.path_mode, cfg)   # new spacing: redo the spline
+        spline_key = state.value("spline_spacing")
         if state.drive:
             state.drive = False
             if mission.done or mission.collided:
@@ -278,10 +289,15 @@ def main():
             status = "enter to plan" + (", space to go" if state.execute else "")
 
         # ---- drawing ---------------------------------------------------
-        grid_art.set(mission.grid, state.show_grid, faded=state.uses_exact_geometry)
+        potential.set(world, mission.samples, mission.goal, cfg,
+                      state.planner == "potential field" and state.show_search)
+        grid_art.set(mission.grid, state.show_grid,
+                     faded=state.uses_exact_geometry or state.planner == "potential field",
+                     cost=mission.update_cost(cfg))
         cspace.set(world, state.value("inflate"), state.uses_exact_geometry and state.show_geometry)
         obstacles.set_visible(state.show_geometry)
-        search.set(replay["result"], mission.grid, replay["k"], state.show_search)
+        search.set(replay["result"], mission.grid, replay["k"], state.show_search,
+                   lw=1.8 if state.planner == "potential field" else 0.7)
         scan_art.set(mission.scan if state.mapped else None)
         pts = samples() if (not state.mapped and state.show_samples) else np.empty((0, 2))
         sample_dots.set_data(pts[:, 0], pts[:, 1])
@@ -320,10 +336,19 @@ def main():
         else:
             lookahead.set(None, 0, False)
         panel.update(state, mission, status)
+        legend.update(state, mission)
         return []
 
+    if args.smooth:
+        state.path_mode = args.smooth.replace("+", " + ")
+        cfg = state.mission_config()
     if args.headless or args.snapshot:
         do_plan(animate=False)
+        if args.smooth:
+            k = mission.curvature
+            print(f"path {mission.path_mode}: {path_length(mission.path):.2f} m"
+                  + (f", max curvature {k:.1f} 1/m" if k else "")
+                  + (f" ({mission.path_note})" if mission.path_note else ""))
         mission.driving = bool(mission.path)
     app.run(fig, state, step, args.headless, args.steps, args.snapshot,
             done=lambda: not mission.driving)

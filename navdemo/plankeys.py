@@ -8,7 +8,7 @@ import time
 
 from . import app
 from .keys import clear_default_keymap, _MIN_REPEAT_INTERVAL
-from .planners import PLANNERS
+from .planners import PATH_MODES, PLANNERS
 from .planstate import PlanState
 from .sim import CONTROL_LAWS
 
@@ -22,14 +22,15 @@ HELP = """
  planning                 map / world                 display
  --------                 -----------                 -------
  enter  plan              m  known map / map as we go g / o  grid / obstacles
- p  planner: A*/RRT/RRT*  , / .  rotate the world 1°  y  search (A* cells, tree)
- n  A*: 4 / 8 connected   k / l  rotate it 5°         S  screenshot (2 pngs)
- x  RRT: grid / exact     0  unrotated, designed      h  this help
- f  RRT: stop at 1st path    start and goal           q  quit
- s  shortcut the path     v  another building variant
-    (again: as planned)   u / d  known map: fresh
- 1..8   world                samples / show them
- mouse  left: goal        tab / S-tab  select, > / <  change it
+ p  planner: A*, RRT,     , / .  rotate the world 1°  y  search (A* cells, tree,
+    RRT*, potential field k / l  rotate it 5°            field descent)
+ n  A*: 4 / 8 connected   0  unrotated, designed      S  screenshot (2 pngs)
+ x  RRT: grid / exact        start and goal           h  this help
+ f  RRT: stop at 1st path v  another building variant q  quit
+ s  smoothing of plans:   u / d  known map: fresh
+    spline/shortcut/both     samples / show them
+ 1..8   world             tab / S-tab  select, > / <  change it
+ mouse  left: goal
         right: start
 
  executing the path (e: on / off)
@@ -99,6 +100,9 @@ def make_handler(state: PlanState, fig=None, ax=None, demo="planning"):
             if state.planner == "A*":
                 print("x: only RRT/RRT* can check the exact geometry -- A* needs grid "
                       "cells to search (press p to switch planner)")
+            elif state.planner == "potential field":
+                print("x: only RRT/RRT* -- the potential field is pushed by the sample "
+                      "points, it checks nothing")
             elif state.mapped:
                 print("x: not while mapping as we go -- the grid is all the robot knows")
             else:
@@ -107,7 +111,8 @@ def make_handler(state: PlanState, fig=None, ax=None, demo="planning"):
         elif k == "f":
             state.stop_at_goal = not state.stop_at_goal
         elif k == "s":
-            state.shorten = True
+            state.path_mode = _cycle(PATH_MODES, state.path_mode)
+            state.restyle = True
         elif k == "c":
             state.law = _cycle(CONTROL_LAWS, state.law)
         elif k == "b":

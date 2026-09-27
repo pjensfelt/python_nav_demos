@@ -10,7 +10,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle as CirclePatch, Patch, Polygon as PolygonPatch, Rectangle
 
-from .planners import path_length
+from .planners import field_potential, path_length
 from .planstate import PlanState, TUNABLES
 from .world import Circle
 
@@ -18,6 +18,7 @@ from .world import Circle
 C_UNKNOWN = (0.93, 0.89, 0.78, 0.85)
 C_INFLATE = (0.55, 0.60, 0.80, 0.45)
 C_OBSTACLE = (0.25, 0.28, 0.45, 0.85)
+C_COST = (0.85, 0.25, 0.15)        # A*'s cost near obstacles, as a tint on free cells
 
 
 def setup_axes(fig, title):
@@ -77,7 +78,7 @@ class GridArtist:
     """The occupancy grid as an image, plus cell lines when cells are big
     enough to see."""
 
-    MAX_LINES = 60   # draw cell borders only up to this many cells per side
+    MAX_LINES = 150  # draw cell borders only up to this many cells per side (0.1 m cells: ~100)
 
     def __init__(self, ax):
         self.ax = ax
@@ -85,8 +86,11 @@ class GridArtist:
         self.lines = LineCollection([], colors=[(0, 0, 0, 0.12)], linewidths=0.5, zorder=2)
         ax.add_collection(self.lines)
 
-    def set(self, grid, visible=True, faded=False):
+    def set(self, grid, visible=True, faded=False, cost=None):
         img = np.zeros((grid.nx, grid.ny, 4))
+        if cost is not None:
+            img[..., :3] = C_COST
+            img[..., 3] = 0.6 * cost
         img[~grid.known] = C_UNKNOWN
         img[grid.occ] = C_INFLATE
         img[grid.obstacle] = C_OBSTACLE
@@ -130,8 +134,9 @@ class SearchArtist:
             return 0
         return len(result.expanded) if result.expanded else len(result.events)
 
-    def set(self, result, grid, k, visible=True):
+    def set(self, result, grid, k, visible=True, lw=0.7):
         self.tree.set_segments([])
+        self.tree.set_linewidth(lw)
         if self.im is not None:
             self.im.set_visible(False)
         if result is None or not visible:
@@ -163,6 +168,50 @@ class SearchArtist:
     @property
     def artists(self):
         return ([self.im] if self.im is not None else []) + [self.tree]
+
+
+class PotentialArtist:
+    """The potential field the planner descends, as a shading (low = dark,
+    high = bright), drawn with the search (y) -- so the valleys it gets
+    stuck in can be seen."""
+
+    SPACING = 0.05     # m between the points it is evaluated at
+
+    def __init__(self, ax):
+        self.ax = ax
+        self.im = None
+        self.key = None
+
+    def set(self, world, samples, goal, cfg, visible):
+        if not visible or samples is None:
+            if self.im is not None:
+                self.im.set_visible(False)
+            return
+        key = (id(samples), tuple(goal), cfg["k_rep"], cfg["d0"], cfg["inflate"], cfg["spacing"])
+        if key != self.key:
+            self.key = key
+            x0, x1, y0, y1 = world.bounds
+            xs = np.arange(x0, x1 + 1e-9, self.SPACING)
+            ys = np.arange(y0, y1 + 1e-9, self.SPACING)
+            X, Y = np.meshgrid(xs, ys)
+            u = field_potential(np.column_stack([X.ravel(), Y.ravel()]), np.asarray(goal),
+                                samples, cfg["k_rep"], cfg["d0"], cfg["inflate"], cfg["spacing"])
+            # capped just above the largest pull towards the goal: the
+            # repulsion shoots up at the walls and would otherwise leave
+            # everything else one colour
+            U = u.reshape(X.shape)
+            dg = np.hypot(X - goal[0], Y - goal[1])
+            U = np.minimum(U, 1.15 * dg.max())
+            ext = (x0 - self.SPACING / 2, x1 + self.SPACING / 2,
+                   y0 - self.SPACING / 2, y1 + self.SPACING / 2)
+            if self.im is None:
+                self.im = self.ax.imshow(U, origin="lower", extent=ext, cmap="plasma",
+                                         alpha=0.45, interpolation="bilinear", zorder=2)
+            else:
+                self.im.set_data(U)
+                self.im.set_extent(ext)
+            self.im.set_clim(U.min(), U.max())
+        self.im.set_visible(True)
 
 
 class CSpaceArtist:
@@ -223,23 +272,69 @@ class ScanArtist:
         return [self.rays, self.hits]
 
 
-def add_legend(fig):
-    handles = [
-        Patch(facecolor=(0, 0, 0, 0.10), edgecolor="k", label="real obstacle"),
-        Line2D([], [], color="tab:orange", marker=".", lw=0, label="sample point (known map)"),
-        Patch(facecolor=C_OBSTACLE, label="map: occupied cell"),
-        Patch(facecolor=C_INFLATE, label="planning map: inflation"),
-        Patch(facecolor=C_UNKNOWN, label="unknown (planned as free)"),
-        Line2D([], [], color=(0.1, 0.55, 0.3), lw=1, label="RRT tree"),
-        Patch(facecolor=(0.9, 0.6, 0.2, 0.5), label="A* expanded"),
-        Line2D([], [], color="C0", lw=2.5, label="plan"),
-        Line2D([], [], color="0.4", lw=1, ls="--", label="earlier plans"),
-        Line2D([], [], color="C3", lw=1.2, ls="--", label="grown obstacle (exact checks)"),
-        Line2D([], [], color="r", lw=1, label="driven"),
-        Line2D([], [], color="tab:purple", lw=1.5, ls="--", label="pose estimate (loc. jitter)"),
-    ]
-    fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.01, 0.02),
-               fontsize=7, frameon=False, ncol=1)
+class Legend:
+    """The legend, listing only what is on screen right now: the entries
+    come and go with the display toggles, the planner and the mode."""
+
+    def __init__(self, fig):
+        self.fig = fig
+        self.legend = None
+        self.labels = None
+
+    @staticmethod
+    def entries(state: PlanState, mission):
+        r = mission.result
+        a_star = state.planner == "A*"
+        e = []
+        if state.show_geometry:
+            e.append(Patch(facecolor=(0, 0, 0, 0.10), edgecolor="k", label="real obstacle"))
+        if not state.mapped and state.show_samples:
+            e.append(Line2D([], [], color="tab:orange", marker=".", lw=0,
+                            label="sample point (known map)"))
+        if state.show_grid:
+            e.append(Patch(facecolor=C_OBSTACLE, label="map: occupied cell"))
+            e.append(Patch(facecolor=C_INFLATE, label="planning map: inflation"))
+            if state.mapped:
+                e.append(Patch(facecolor=C_UNKNOWN, label="unknown (planned as free)"))
+            if a_star and mission.cost is not None:
+                e.append(Patch(facecolor=(*C_COST, 0.4), label="A*: cost near obstacles"))
+        if state.show_search and r is not None:
+            if a_star and r.expanded:
+                e.append(Patch(facecolor=(0.9, 0.6, 0.2, 0.5), label="A* expanded"))
+            elif state.planner == "potential field" and r.nodes is not None:
+                e.append(Line2D([], [], color=(0.1, 0.55, 0.3), lw=1, label="field descent"))
+                e.append(Patch(facecolor=(0.95, 0.75, 0.2, 0.6), label="potential (dark = low)"))
+            elif not a_star and r.nodes is not None:
+                e.append(Line2D([], [], color=(0.1, 0.55, 0.3), lw=1, label="RRT tree"))
+        if mission.path:
+            e.append(Line2D([], [], color="C0", lw=2.5,
+                            label=f"plan, {mission.path_mode}" if mission.shortened else "plan"))
+            if mission.shortened:
+                e.append(Line2D([], [], color="C0", lw=1, ls=":", label="plan as planned"))
+        if mission.old_paths:
+            e.append(Line2D([], [], color="0.4", lw=1, ls="--", label="earlier plans"))
+        if state.uses_exact_geometry and state.show_geometry:
+            e.append(Line2D([], [], color="C3", lw=1.2, ls="--",
+                            label="grown obstacle (exact checks)"))
+        if state.execute:
+            if state.show_trail and len(mission.trail) > 1:
+                e.append(Line2D([], [], color="r", lw=1, label="driven"))
+            if state.value("loc_xy") > 0 or state.value("loc_th") > 0:
+                e.append(Line2D([], [], color="tab:purple", lw=1.5, ls="--",
+                                label="pose estimate (loc. jitter)"))
+        return e
+
+    def update(self, state, mission):
+        handles = self.entries(state, mission)
+        labels = tuple(h.get_label() for h in handles)
+        if labels == self.labels:
+            return                      # unchanged: don't rebuild every frame
+        if self.legend is not None:
+            self.legend.remove()
+        self.legend = self.fig.legend(handles=handles, loc="lower left",
+                                      bbox_to_anchor=(0.01, 0.02), fontsize=7,
+                                      frameon=False, ncol=1) if handles else None
+        self.labels = labels
 
 
 class Panel:
@@ -278,14 +373,25 @@ class Panel:
                  f"grid:   {g.nx} x {g.ny} cells, {100 * g.occ.mean():.0f}% occupied"]
         r = mission.result
         if r is not None:
+            # nothing searched at all when the start or goal is occupied
             what = (f"{len(r.expanded)} cells expanded" if r.expanded
-                    else f"{len(r.nodes)} nodes, {r.iterations} iter")
+                    else f"{r.iterations} steps" if (r.nodes is not None
+                                                      and state.planner == "potential field")
+                    else f"{len(r.nodes)} nodes, {r.iterations} iter" if r.nodes is not None
+                    else r.message)
             plen = f"{r.cost:.2f} m" if r.path else "none"
             rows += [f"plan:   {plen}, {1000 * r.seconds:.0f} ms", f"        {what}"]
             if mission.shortened:
-                rows.append(f"        shortcut: {path_length(mission.path):.2f} m (s: undo)")
+                k = mission.curvature
+                rows.append(f"        {mission.path_mode} (s): {path_length(mission.path):.2f} m")
+                if k:
+                    rows.append(f"        max curvature {k:.1f} 1/m (r {1 / k:.2f} m)")
+                if mission.path_note:
+                    rows.append("        " + mission.path_note)
             elif r.path:
-                rows.append("        shortcut: off (s)")
+                rows.append("        smoothing: off (s)")
+        elif state.path_mode != "as planned":
+            rows.append(f"smooth: {state.path_mode} (s)")
         rows += [f"status: {status}"]
         if state.execute:
             f = mission.follower

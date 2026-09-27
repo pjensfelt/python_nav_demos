@@ -486,6 +486,24 @@ Implementations in `navdemo/planners.py` are kept short to be readable.
   chooses between stopping at the first path and using all iterations.
 - **RRT\*** adds the best-parent choice and rewiring within `radius`, and
   always uses all iterations.
+- **Potential field** works on the known map's sample points, not on the
+  grid: the goal pulls (with strength 1, less within 1 m of it), and every
+  sample point pushes away. The push is the classic form,
+  `k_rep` · (1/ρ − 1/`d0`) / ρ², where ρ is the distance left before the
+  inflation distance is used up. It only acts within `d0`, and it is scaled
+  by the sample spacing so a denser survey doesn't push harder. The path
+  follows the force downhill in 2 cm steps. If the last 100 steps got less
+  than 0.1 m anywhere, it is stuck in a local minimum and says so. With `y`
+  the potential is shown as a shading (dark = low) and the descent is
+  replayed as a line. It needs the known map's samples, so it can't plan
+  while mapping as we go.
+  - It gets stuck in every world except the clutter one (world 4), where it
+    finds a 13.4 m path in 16 ms (as drawn). A wall between the start and
+    the goal is enough: in world 1 it runs straight at the middle wall and
+    stops at its foot, where the pull and the push cancel.
+  - Even in the clutter world the settings matter: `d0` 1 m gets it stuck
+    whatever `k_rep` is, and with `k_rep` 1 already `d0` 0.5 m does. The
+    gaps between obstacles close when the push reaches too far.
 - **`x`** makes RRT/RRT* check against the exact geometry instead of the grid.
   This skips discretization entirely. The obstacles grown by `inflate` (what
   the planner now avoids) are drawn dashed red, and the unused grid is faded.
@@ -494,12 +512,49 @@ Implementations in `navdemo/planners.py` are kept short to be readable.
   where the grid is all the robot has. The panel's `checks:` line always says
   which check is in use, and pressing `x` prints why when it doesn't apply.
   Like every planner setting, it takes effect when you replan (`enter`).
-- **`s`** shortcuts the path already planned, with no new search: from each
-  point it jumps to the furthest point still in line of sight (the WASP
-  `optimize_path`). The planned path stays dotted underneath, and the panel
-  gives both lengths. Pressing `s` again goes back to the path as planned.
-  It works before driving (after that, `r` first). A new plan, including a
-  replan while mapping as we go, comes out as planned.
+- **`s`** picks how every plan is smoothed before it is driven, cycling
+  through as planned → **spline** → **shortcut** → **shortcut + spline** →
+  as planned. It applies at once to the current plan, with no new search,
+  and to every plan after it, replans while mapping as we go included. The
+  plan as planned stays dotted underneath, and the panel gives the length
+  and, for a spline, its maximum curvature (and turning radius). Changed
+  while the robot is driving, it smooths the part of the plan still ahead,
+  starting from where the robot is.
+  - The **shortcut** jumps from each point to the furthest point still in
+    line of sight (the WASP `optimize_path`).
+  - The **spline** is a cubic B-spline with control points `spline` apart
+    along the path (0.5 m by default). It doesn't pass through them but
+    rounds off between them, with continuous curvature. Rounding a corner
+    cuts inside it, towards the obstacle, so the curve is checked against
+    the map again. Where a piece of it hits, the control points around that
+    corner are put closer together and it is checked again, down to 5 cm
+    apart. If it still hits, the path is kept without the spline and the
+    panel says so. Changing `spline` redoes it.
+  - Measured in world 1 (A\*, as drawn): the plan is 17.54 m. Splined it is
+    17.21 m but still has 13.7 1/m at the corner by the gap, where the path
+    hugs the inflated wall and there is no room to round it: smoothing needs
+    room. Shortcut, 16.33 m; shortcut + spline, 16.24 m with at most
+    4.5 1/m. With the cost map on (`cost_w` 5), the spline alone gives the
+    smoothest path of all, at most 1.7 1/m (a 0.6 m radius), because the
+    path now has room around it. The shortcut, which ignores the cost,
+    pulls it back to the walls.
+  - With stop and turn a spline is worse, not better: a curve is nothing
+    but small corners to it (A\*: 34 s as planned, 46 s splined, 21 s
+    shortcut, 32 s shortcut + spline). Pure pursuit gains little in time (18 s → 17 s) but follows
+    a path it can actually drive.
+
+- **`cost_w` / `cost_sig`** (A\*) add a **cost for driving near obstacles**,
+  the answer to "why not just inflate more?". The planning map is blurred with
+  a Gaussian of standard deviation `cost_sig`, giving a cost from 0 far away
+  to 1 at the inflated obstacles, and stepping into a cell costs
+  step · (1 + `cost_w` · cost). The cost is shown as a red tint on the free
+  cells as soon as `cost_w` is above 0, before you plan, and follows the map
+  while mapping as we go. Unlike more inflation, it closes nothing: a narrow door that is the
+  only way through is still used, but where there is room A\* trades length
+  for clearance. In world 1 (`cost_sig` 0.3 m) the closest approach to a real
+  obstacle goes from 0.35 m to 0.55 / 0.78 / 0.99 m for `cost_w` 2 / 5 / 20,
+  for a path 1.6 / 5 / 8 % longer. `cost_w` 0 turns it off (the default).
+  Like inflation, it is made from the map alone, with no model of the world.
 
 Structure taken from the WASP assignment 3 planners
 (KTH-RPL/wasp_autonomous_systems, branch ht26, `src/wasp_as_ass_3`), with A*
@@ -578,7 +633,7 @@ close it, and the robot takes the long way (18 m instead of 9 m).
 | `1`…`8` / `v` | world / another variant of the building | `n` | A*: 8 / 4 connectivity |
 | left click | set the goal | `x` | RRT/RRT*: grid / exact geometry |
 | right click | set the start | `f` | RRT: stop at first path / all iterations |
-| `tab` / `shift-tab` | select a parameter | `s` | shortcut the path (again: undo) |
+| `tab` / `shift-tab` | select a parameter | `s` | smooth: spline / shortcut / both / off |
 | `>` / `<` | raise / lower it | `e` | execution (a robot drives the plan) on / off |
 | `c` / `b` | control law / turn in place (pure pursuit) | `a` / `t` | lookahead geometry / trail on/off |
 | `g` / `o` / `y` | grid / real obstacles / search on/off | | |
@@ -600,10 +655,13 @@ marks the plan as stale until you press `enter`.
 
 `--set` takes any row name (`res`, `inflate`, `imperfect`, `spacing`,
 `sample_sigma`, `min_hits`, `sensor_range`, `rays`,
-`noise`, `h_weight`, `iterations`, `step`, `goal_bias`, `radius`, `anim`,
+`noise`, `h_weight`, `cost_weight`, `cost_sigma`, `iterations`, `step`, `goal_bias`, `radius`,
+`spline_spacing`, `k_rep`, `d0`, `anim`,
 `lookahead`, `vmax`, `kp`, `time_scale`). Other options are `--rotate DEG`, `--exact`,
 `--execute` (start with execution on), `--law pure-pursuit|stop-and-turn`,
-`--no-turn-in-place`, `--snapshot FILE.png` and `--steps N`.
+`--no-turn-in-place`, `--smooth spline|shortcut|shortcut+spline` (start with
+this smoothing, as `s`),
+`--snapshot FILE.png` and `--steps N`.
 
 ### Worlds
 

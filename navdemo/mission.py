@@ -22,7 +22,8 @@ from .grid import GridChecker, GeometryChecker, known_map
 from .rasterize import sample_outlines
 from .mapping import Lidar, MappedGrid
 from .path import Path
-from .planners import astar, rrt, rrtstar, shortcut, path_length
+from .planners import (astar, rrt, rrtstar, potential_field, PlanResult, shortcut, spline, path_length, smoothed_cost,
+                       max_curvature, PATH_MODES)
 from .sim import Robot, Follower
 
 
@@ -59,6 +60,8 @@ class Mission:
             self.grid = known_map(self.world, samples, cfg["res"], cfg["inflate"],
                                   int(cfg["min_hits"]))
             self.lidar = None
+        # the survey's points, which the potential field is pushed away from
+        self.samples = None if cfg["mapped"] else np.asarray(samples)
         self.reset()
 
     def reset(self):
@@ -69,8 +72,12 @@ class Mission:
         self.robot = Robot(*self.start)
         self.follower = None
         self.result = None           # the latest PlanResult
-        self.path = []               # the path to drive (the plan, or its shortcut)
-        self.shortened = False       # is self.path the shortcut of result.path?
+        self.path = []               # the path to drive: the plan, shortcut and/or splined
+        self.path_mode = PATH_MODES[0]
+        self.spline_spacing = None   # the control-point spacing the spline ended up with
+        self.path_note = ""          # e.g. why there is no spline
+        self.cost = None             # A*'s cost for being near obstacles, if used
+        self._cost_key = None
         self.old_paths = []          # earlier plans, for showing the replans
         self.trail = [(self.robot.x, self.robot.y)]
         self.t = 0.0
@@ -96,7 +103,7 @@ class Mission:
     def checker(self, cfg):
         # (cfg["exact_geometry"] is already False for A* and when mapping,
         # see PlanState.uses_exact_geometry)
-        if cfg["exact_geometry"] and cfg["planner"] != "A*" and self.lidar is None:
+        if cfg["exact_geometry"] and cfg["planner"] in ("RRT", "RRT*") and self.lidar is None:
             return GeometryChecker(self.world, cfg["inflate"])
         return GridChecker(self.grid, ignore={self.grid.cell(self.robot.x, self.robot.y)})
 
@@ -106,8 +113,17 @@ class Mission:
         checker = self.checker(cfg)
         p = cfg["planner"]
         if p == "A*":
+            self.update_cost(cfg)
             res = astar(self.grid, start, self.goal, cfg["eight"], cfg["h_weight"],
-                        free=checker.free)
+                        free=checker.free, cost=self.cost,
+                        cost_weight=cfg.get("cost_weight", 0))
+        elif p == "potential field":
+            if self.samples is None:
+                res = PlanResult([], message="the potential field needs the known map's "
+                                             "sample points (m)")
+            else:
+                res = potential_field(self.samples, start, self.goal, self.world.bounds,
+                                      cfg["k_rep"], cfg["d0"], cfg["inflate"], cfg["spacing"])
         elif p == "RRT":
             res = rrt(checker, self.world.bounds, start, self.goal, cfg["iterations"],
                       cfg["step"], cfg["goal_bias"], cfg["stop_at_goal"], self.rng)
@@ -117,25 +133,68 @@ class Mission:
         self.result = res
         if self.path:
             self.old_paths.append(self.path)
-        self.path = res.path          # as planned; 's' shortcuts it (shorten())
-        self.shortened = False
+        # the path to drive: the plan, smoothed as selected with 's' --
+        # every plan, replans while driving included
+        self.path, self.path_mode, self.path_note, self.spline_spacing = res.path, PATH_MODES[0], "", None
         self.failed = "" if res.path else res.message
         if self.path:
-            self._make_follower()
+            self.set_path_mode(cfg.get("path_mode", PATH_MODES[0]), cfg)
         return res
 
-    def shorten(self, cfg):
-        """Shortcut the current plan -- or, if it already is, go back to the
-        plan as it came from the planner. Only before driving: the follower
-        restarts on the new path."""
+    def update_cost(self, cfg):
+        """A*'s cost for being near obstacles (planners.smoothed_cost), or
+        None when it is off or the planner isn't A*. Recomputed only when
+        the planning map or cost_sigma has changed -- so it can be shown
+        before planning, and follows the map while mapping as we go."""
+        if cfg["planner"] != "A*" or cfg.get("cost_weight", 0) <= 0:
+            self.cost = None
+            return None
+        key = (self.grid.occ.shape, self.grid.occ.tobytes(), self.grid.res, cfg["cost_sigma"])
+        if self.cost is None or key != self._cost_key:
+            self.cost = smoothed_cost(self.grid.occ, self.grid.res, cfg["cost_sigma"])
+            self._cost_key = key
+        return self.cost
+
+    @property
+    def shortened(self):
+        """Is the path driven different from the plan as planned?"""
+        return self.path_mode != PATH_MODES[0]
+
+    def set_path_mode(self, mode, cfg):
+        """Make the path to drive from the plan: shortcut it and/or spline
+        it, each checked against the map. If the spline collides even with
+        its control points close together, the unsplined path is kept.
+
+        Once the robot is on its way, only the part of the plan still ahead
+        of it is smoothed, starting from where it is -- otherwise the new
+        path would begin behind it and the follower would drive back."""
         if self.result is None or not self.result.path:
             return False
-        if self.shortened:
-            self.path, self.shortened = self.result.path, False
-        else:
-            self.path, self.shortened = shortcut(self.checker(cfg), self.result.path), True
+        chk = self.checker(cfg)
+        path = self.result.path
+        if self.t > 0 and len(path) > 1:
+            plan = Path(path, name="plan")
+            s = plan.closest(self.robot.x, self.robot.y)[2]
+            ahead = [tuple(p) for p, sp in zip(plan.xy, plan.s) if sp > s + 1e-6]
+            path = [(self.robot.x, self.robot.y)] + (ahead or [tuple(plan.xy[-1])])
+        if "shortcut" in mode:
+            path = shortcut(chk, path)
+        self.path_note, self.spline_spacing = "", None
+        if "spline" in mode:
+            pts, used = spline(chk, path, cfg["spline_spacing"])
+            if pts is None:
+                self.path_note = "spline collides: kept the path without it"
+            else:
+                path, self.spline_spacing = pts, used
+        self.path, self.path_mode = path, mode
         self._make_follower()
         return True
+
+    @property
+    def curvature(self):
+        """Max curvature of a splined path [1/m] (a polyline's corners have
+        infinite curvature, so None for those)."""
+        return max_curvature(self.path) if self.spline_spacing else None
 
     def _make_follower(self):
         """A fresh Follower on the new path, starting from wherever the

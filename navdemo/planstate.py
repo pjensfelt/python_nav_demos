@@ -10,7 +10,7 @@ from typing import List
 import numpy as np
 
 from .params import LOC_TUNABLES, Tunable
-from .planners import PLANNERS
+from .planners import PATH_MODES, PLANNERS
 from .sim import CONTROL_LAWS
 
 ROBOT_RADIUS = 0.2   # m, as in run_pure_pursuit.py / display_robot.m
@@ -22,6 +22,11 @@ _SPACING = [0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5]
 _SAMPLE_SIGMA = [0.0, 0.01, 0.02, 0.05, 0.1, 0.2]
 _MIN_HITS = [1, 2, 3, 5, 10]
 _HWEIGHT = [0.0, 0.5, 1.0, 2.0, 5.0]
+_COST_W = [0.0, 1.0, 2.0, 5.0, 10.0, 20.0]
+_COST_SIGMA = [0.1, 0.2, 0.3, 0.5, 1.0]
+_SPLINE = [0.1, 0.2, 0.3, 0.5, 1.0]
+_K_REP = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0]
+_D0 = [0.2, 0.3, 0.5, 0.75, 1.0, 1.5]
 _ITER = [100, 250, 500, 1000, 2000, 5000, 10000]
 _STEP = [0.1, 0.25, 0.5, 1.0, 2.0]
 _BIAS = [0.0, 0.05, 0.1, 0.2, 0.5]
@@ -61,11 +66,22 @@ TUNABLES: List[Tunable] = [
     Tunable("noise", "sig_rng", _NOISE, 0, "m"),
     # the planners
     Tunable("h_weight", "h_weight", _HWEIGHT, _HWEIGHT.index(1.0)),
+    # A*: a cost for driving near obstacles, from the planning map blurred
+    # with a Gaussian (planners.smoothed_cost); 0 = off, only length counts
+    Tunable("cost_weight", "cost_w", _COST_W, 0),
+    Tunable("cost_sigma", "cost_sig", _COST_SIGMA, _COST_SIGMA.index(0.3), "m"),
     CountTunable("iterations", "iters", _ITER, _ITER.index(2000)),
     Tunable("step", "step", _STEP, _STEP.index(0.5), "m"),
     Tunable("goal_bias", "goal_bias", _BIAS, _BIAS.index(0.05)),
     Tunable("radius", "radius", _RADIUS, _RADIUS.index(1.0), "m"),
-    Tunable("anim", "replay", _ANIM, _ANIM.index(3.0), "s"),
+    # the potential field: how hard each sample point pushes, and from how
+    # far (beyond the inflation distance, which it must keep clear)
+    Tunable("k_rep", "k_rep", _K_REP, _K_REP.index(0.1)),
+    Tunable("d0", "d0", _D0, _D0.index(0.5), "m"),
+    # the spline ('s'): spacing of its control points along the path --
+    # bigger rounds corners more widely (planners.spline)
+    Tunable("spline_spacing", "spline", _SPLINE, _SPLINE.index(0.5), "m"),
+    Tunable("anim", "replay", _ANIM, _ANIM.index(1.0), "s"),
     # execution (pure pursuit)
     Tunable("lookahead", "lookahd", _LOOKAHEAD, _LOOKAHEAD.index(0.3), "m"),
     Tunable("vmax", "v_max", _VMAX, _VMAX.index(1.0), "m/s"),
@@ -78,10 +94,14 @@ TUNABLE_BY_NAME = {t.name: t for t in TUNABLES}
 # always shown. Rows for other planners are hidden and skipped by tab.
 _ONLY_FOR = {
     "h_weight": {"A*"},
+    "cost_weight": {"A*"},
+    "cost_sigma": {"A*"},
     "iterations": {"RRT", "RRT*"},
     "step": {"RRT", "RRT*"},
     "goal_bias": {"RRT", "RRT*"},
     "radius": {"RRT*"},
+    "k_rep": {"potential field"},
+    "d0": {"potential field"},
 }
 
 # Fixed pure pursuit settings (the defaults of run_pure_pursuit.py) that
@@ -121,7 +141,9 @@ class PlanState:
     goal: object = None
     newWorld: object = None            # an int (1..9 key) or a World
     plan: bool = False
-    shorten: bool = False              # s: shortcut the current path (or undo it)
+    # 's' cycles how every plan is smoothed before it is driven (planners.PATH_MODES)
+    path_mode: str = PATH_MODES[0]
+    restyle: bool = False              # one-shot: apply a new path_mode to the current plan
     drive: bool = False                # space: start / pause execution
     reset: bool = False
     newStart: object = None
@@ -166,13 +188,15 @@ class PlanState:
         """Is the planner checking the real geometry rather than the grid?
         Only RRT/RRT* can (A* needs cells), and only with the known map (when
         mapping, the grid is all the robot has)."""
-        return self.exact_geometry and self.planner != "A*" and not self.mapped
+        return self.exact_geometry and self.planner in ("RRT", "RRT*") and not self.mapped
 
     def checks_text(self):
         if self.uses_exact_geometry:
             return "exact geometry"
         if self.planner == "A*":
             return "grid (A* needs cells)"
+        if self.planner == "potential field":
+            return "sample points (pushed away)"
         if self.mapped:
             return "grid (the map is all we have)"
         return "grid"
@@ -202,7 +226,7 @@ class PlanState:
         cfg = dict(FIXED_CONTROL, law=self.law, mapped=self.mapped,
                    planner=self.planner, eight=self.eight,
                    exact_geometry=self.uses_exact_geometry,
-                   stop_at_goal=self.stop_at_goal,
+                   stop_at_goal=self.stop_at_goal, path_mode=self.path_mode,
                    turn_in_place=self.turn_in_place)
         cfg.update({t.name: self.value(t.name) for t in TUNABLES})
         cfg["rays"] = int(cfg["rays"])

@@ -71,7 +71,18 @@ first version of this file (2026-09-27):
   absurdly small values;
 - the pure pursuit demo **hides the rows the control law doesn't use**
   (blank gaps keep the layout; tab skips them), and takes
-  `--law stop-and-turn`; the planning demo's `--set` takes angles in degrees.
+  `--law stop-and-turn`; the planning demo's `--set` takes angles in degrees;
+- planning demo, later on 2026-09-27: a **cost for driving near obstacles**
+  for A* (`cost_w`, `cost_sig`: the planning map blurred with a Gaussian,
+  shown as a red tint as soon as it's on); **`s` is now a smoothing setting**
+  (as planned / spline / shortcut / shortcut + spline) applied to every plan
+  and replan, changeable while driving (then it smooths the rest from the
+  robot); a **B-spline** (`spline` = control-point spacing, tightened locally
+  where it hits the map, max curvature on the panel); a **potential field**
+  planner on the known map's sample points (`k_rep`, `d0`; shading of the
+  potential with `y`; stuck in every world but clutter); the **legend lists
+  only what's on screen**; cell borders drawn at 0.1 m cells; replay 1 s by
+  default; a crash with the goal in an occupied cell fixed.
 Check `git -C python_nav_demos status` when resuming anyway.
 
 ## Decisions and preferences to keep (why the demos look the way they do)
@@ -111,9 +122,8 @@ Check `git -C python_nav_demos status` when resuming anyway.
 ### Planning demo (where we are)
 
 From the list agreed when moving to the planning demo:
-1. **Start simple** -- partly done (execution toggle). Still open: a legend
-   that only shows what is on screen (it lists the RRT tree, driven trail,
-   earlier plans ... even when they aren't there).
+1. **Start simple** -- done (execution toggle, legend shows only what is on
+   screen).
 2. **Trim the worlds to one lesson each** -- not done. Proposal: drop "thin
    walls" (its lesson, walls vanishing between cell centres, is gone; the
    grid demo covers thin walls), maybe fold "gap" into "rooms"; keep narrow
@@ -133,12 +143,11 @@ In the order suggested, all waiting for a go-ahead and a design round:
   modes (last scan only / accumulate / clear along rays / decay), a person in
   a doorway who leaves, a chair seen and then out of view. The two-layer map
   already makes clearing possible (it only touches the map proper).
-- **Reactive local planners** (slides 26–33): potential field, VFH, DWA as
-  executors next to pure pursuit. The bug trap shows potential-field local
-  minima; DWA fits the simulator's acceleration limits.
-- **Cost map / Gaussian smoothing for clearance** (slides 13–15).
-- **Pure pursuit with noise** (slide 4 idea): noise on the pose the
-  controller uses and/or on actuation; lookahead vs jitter.
+- **Reactive local planners** (slides 26–33): VFH, DWA as executors next to
+  pure pursuit (a potential field exists now, but as a global planner on the
+  samples, not as an executor). DWA fits the simulator's acceleration limits.
+- Done: cost map for clearance (slides 13–15), localization jitter (slide 4
+  idea), spline smoothing (a simpler form of slides 16–22).
 - **Emergency stop and what comes after it** (slides 39–40): protective vs
   latched stop, speed-dependent safety field (v²/2a, the same as the braking
   profile), the recovery ladder, operator interventions as the metric, a

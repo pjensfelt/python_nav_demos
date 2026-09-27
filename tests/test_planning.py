@@ -180,7 +180,7 @@ def _run(world, cfg, seed=0, t_max=150, shortcut=False):
     m.build_map(cfg)
     m.plan(cfg)
     if shortcut:
-        m.shorten(cfg)
+        m.set_path_mode("shortcut", cfg)       # as 's' does for the current plan
     m.driving = bool(m.path)
     while m.driving and m.t < t_max:
         m.advance(0.1, cfg)
@@ -353,20 +353,171 @@ def test_stop_and_turn_is_exact_but_slow():
 
 
 @test
-def test_shortcut_key_acts_on_the_current_path():
-    """'s' shortcuts the path already planned -- no new search, the plan
-    stays as it was -- and pressing it again gives the plan back."""
+def test_s_cycles_the_smoothing_of_the_current_path():
+    """'s' picks how the plan is smoothed -- no new search, the plan stays
+    as it was: spline, shortcut, shortcut + spline, and back. Every version
+    is still free on the map, and the splines have finite curvature."""
+    from types import SimpleNamespace as N
+    from navdemo import plankeys
+    from navdemo.grid import GridChecker
+    from navdemo.planners import PATH_MODES
+    w = World.load("1_gap.json")
+    state = PlanState()
+    plankeys._MIN_REPEAT_INTERVAL = 0.0
+    h, rel = plankeys.make_handler(state)
+    m = Mission(w, ROBOT_RADIUS, np.random.default_rng(0))
+    m.build_map(state.mission_config())
+    res = m.plan(state.mission_config())
+    assert m.path == res.path and not m.shortened and m.curvature is None
+    lengths = {}
+    for mode in PATH_MODES[1:] + PATH_MODES[:1]:
+        h(N(key="s")); rel(N(key="s"))
+        assert state.path_mode == mode and state.restyle
+        assert m.set_path_mode(state.path_mode, state.mission_config()) and m.path_mode == mode
+        assert m.result is res and not m.old_paths
+        chk = GridChecker(m.grid)
+        assert all(chk.segment_free(a, b) for a, b in zip(m.path, m.path[1:])), mode
+        assert np.allclose(m.path[0], res.path[0]) and np.allclose(m.path[-1], res.path[-1])
+        assert ("spline" in mode) == (m.curvature is not None), mode
+        lengths[mode] = path_length(m.path)
+    assert lengths["shortcut"] < res.cost and lengths["shortcut + spline"] < lengths["shortcut"]
+    assert m.path == res.path and not m.shortened
+
+
+@test
+def test_smoothing_applies_to_every_replan_and_mid_drive():
+    """The selected smoothing is applied to every plan, replans while
+    mapping as we go included; changed while driving, it smooths the rest
+    of the plan from where the robot is, so it never drives back."""
+    w = World.load("8_deadend.json")
+    cfg = _cfg(mapped=True, path_mode="shortcut + spline")
+    m = Mission(w, ROBOT_RADIUS, np.random.default_rng(0))
+    m.build_map(cfg)
+    m.plan(cfg)
+    assert m.path_mode == "shortcut + spline"
+    m.driving = True
+    modes = []
+    while m.driving and m.t < 150:
+        before = m.result
+        m.advance(0.1, cfg)
+        if m.result is not before:
+            modes.append(m.path_mode)
+    assert m.done and not m.collided and m.replans > 0
+    assert modes and all(md == "shortcut + spline" for md in modes)
+
+    # changed half way: the new path starts at the robot
     w = World.load("1_gap.json")
     cfg = _cfg()
     m = Mission(w, ROBOT_RADIUS, np.random.default_rng(0))
     m.build_map(cfg)
-    res = m.plan(cfg)
-    assert m.path == res.path and not m.shortened
-    assert m.shorten(cfg)
-    assert m.result is res and m.shortened and not m.old_paths
-    assert len(m.path) < len(res.path) and path_length(m.path) <= res.cost + 1e-9
-    m.shorten(cfg)
-    assert m.path == res.path and not m.shortened
+    m.plan(cfg)
+    m.driving = True
+    while m.t < 6:
+        m.advance(0.1, cfg)
+    x, y = m.robot.x, m.robot.y
+    left = m.result.cost - m.follower.s
+    m.set_path_mode("shortcut + spline", cfg)
+    assert np.allclose(m.path[0], (x, y)) and path_length(m.path) < left
+    while m.driving and m.t < 60:
+        m.advance(0.1, cfg)
+    assert m.done and not m.collided and m.driven < 18
+
+
+@test
+def test_spline_tightens_where_it_would_hit():
+    """Rounding a corner cuts inside it; where that would hit the map the
+    control points are put closer together, down to a limit."""
+    from navdemo.planners import spline
+
+    class Box:            # free everywhere except a block inside the corner
+        def segment_free(self, a, b):
+            return not any(1.7 < x < 1.98 and 0.02 < y < 0.3
+                           for x, y in np.linspace(a, b, 5))
+    pts, used = spline(Box(), [(0, 0), (2, 0), (2, 2)], 1.0)
+    assert pts is not None and used < 1.0
+    free, used_free = spline(type("Free", (), {"segment_free": lambda s, a, b: True})(),
+                             [(0, 0), (2, 0), (2, 2)], 1.0)
+    assert used_free == 1.0
+
+
+@test
+def test_cost_near_obstacles_buys_clearance():
+    """With the smoothed cost, A* keeps further from obstacles for a longer
+    path -- and a narrow door, the only way through, stays usable."""
+    from navdemo.path import Path
+    from navdemo.planners import smoothed_cost
+
+    occ = np.zeros((21, 21), bool)
+    occ[10, 10] = True
+    c = smoothed_cost(occ, 0.1, 0.3)
+    assert c[10, 10] == c.max() and c[0, 0] < 1e-6 and 0 <= c.min() and c.max() <= 1
+
+    def clearance(world, cw):
+        cfg = _cfg(cost_weight=cw)
+        m = Mission(world, ROBOT_RADIUS, np.random.default_rng(0))
+        m.build_map(cfg)
+        r = m.plan(cfg)
+        assert r.path, (world.name, cw)
+        P = Path(r.path)
+        pts = np.array([P.point_at(s) for s in np.linspace(0, P.length, 500)])
+        return r.cost, world.distance(pts).min()
+
+    w = World.load("1_gap.json")
+    (l0, d0), (l5, d5) = clearance(w, 0), clearance(w, 5)
+    assert l5 > l0 and d5 > d0 + 0.2
+    clearance(World.load("2_narrow.json"), 20)      # still gets through the door
+
+
+@test
+def test_goal_in_an_occupied_cell_is_reported_not_a_crash():
+    """Every planner refuses a goal inside an obstacle -- and the panel,
+    legend and search display cope with a result that searched nothing."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from navdemo import plandraw
+    w = World.load("1_gap.json")
+    fig = plt.figure()
+    ax = plandraw.setup_axes(fig, "test")
+    panel, legend, search = plandraw.Panel(fig), plandraw.Legend(fig), plandraw.SearchArtist(ax)
+    for planner in ("A*", "RRT", "RRT*", "potential field"):
+        s = PlanState()
+        s.planner, s.execute = planner, True
+        cfg = s.mission_config()
+        m = Mission(w, ROBOT_RADIUS, np.random.default_rng(0))
+        m.build_map(cfg)
+        m.goal = (5.0, 2.0)                   # on the middle wall
+        r = m.plan(cfg)
+        assert not r.path and r.message and m.failed, planner
+        panel.update(s, m, m.failed)
+        legend.update(s, m)
+        search.set(r, m.grid, search.total(r))
+        assert r.message in panel.text.get_text() or "nodes" in panel.text.get_text()
+    plt.close(fig)
+
+
+@test
+def test_potential_field():
+    """Through the clutter world it finds a way; in front of a wall it gets
+    stuck in a local minimum and says so; it can't plan without the
+    known map's samples. The trace is a chain, replayed like a tree."""
+    cfg = _cfg(planner="potential field")
+    m = _run(World.load("4_clutter.json"), cfg)
+    assert m.done and not m.collided
+    r = m.result
+    assert r.nodes is not None and len(r.events) == len(r.nodes) - 1
+    assert all(c == p + 1 for c, p in r.events)
+
+    m = Mission(World.load("1_gap.json"), ROBOT_RADIUS, np.random.default_rng(0))
+    m.build_map(cfg)
+    r = m.plan(cfg)
+    assert not r.path and "local minimum" in r.message
+    assert abs(r.nodes[-1][0] - 5.0) < 1.0          # stuck at the middle wall
+
+    cfg = _cfg(planner="potential field", mapped=True)
+    m = Mission(World.load("4_clutter.json"), ROBOT_RADIUS, np.random.default_rng(0))
+    m.build_map(cfg)
+    assert not m.plan(cfg).path and "sample points" in m.failed
 
 
 @test

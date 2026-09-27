@@ -16,7 +16,7 @@ have already seen RRT and friends in known worlds in the planning module.
 | 9–10 | Occupancy grids: cell size, amount of expansion | `run_grid.py`; `cell`, `inflate` in `run_planning.py` |
 | 11 | Paths close to obstacles, grid-aligned, not smooth | visible in every A* plan |
 | 12 | "Why can we not just expand obstacles more?" | world 2: raise `inflate` and the door closes |
-| 16 | Path smoothing: direct connection between nodes | `s` (shortcut) |
+| 16 | Path smoothing: direct connection between nodes | `s` (shortcut, spline) |
 | 23 | Pure pursuit, lookahead circle | `run_pure_pursuit.py` |
 | 24 | Environment not fully known, replanning | map-as-you-go mode (`k`) |
 | 37 (type II) | A sensor outlier gets the robot stuck | `sig_rng` 0.1 m while mapping → no path |
@@ -144,8 +144,7 @@ on the spot -- the baseline that shows why pure pursuit (or shortcutting)
 is needed.
 
 Still open for the planning demo:
-- **A legend that shows only what is on screen** (today it lists the RRT
-  tree, driven trail, earlier plans ... even when they aren't shown).
+- ~~A legend that shows only what is on screen~~ -- done 2026-09-27.
 - **Trim the worlds to one lesson each**: drop "thin walls" (its lesson is
   gone; the grid demo covers thin walls), maybe fold "gap" into "rooms";
   keep narrow passage, bug trap, dead end, maze, rooms, clutter.
@@ -187,10 +186,12 @@ Still open for the planning demo:
    already shows potential-field local minima. DWA fits especially well:
    the simulator already has acceleration limits, which *is* the dynamic
    window.
-3. **Cost map / Gaussian smoothing for clearance (slides 13–15).** A soft
-   cost near obstacles for A*, as the answer to slide 12's question. Keeps
-   the narrow passage usable while preferring its centre.
-4. **Pure pursuit with noise levels (slide 4 idea).** Noise on the pose
+3. **Cost map / Gaussian smoothing for clearance (slides 13–15).** Done
+   2026-09-27 (`cost_w`, `cost_sig` for A*). Also done: a potential field
+   as a global planner on the sample points (item 2 as an executor is
+   still open), and B-spline smoothing next to the shortcut.
+4. **Pure pursuit with noise levels (slide 4 idea).** Done 2026-09-27 as
+   localization jitter (`loc_xy`, `loc_th`, no drift). Noise on the pose
    the controller uses and/or on actuation, to show the lookahead trade-off
    under noise (a short lookahead amplifies jitter). True-only noise, or
    true/model if a filter estimates the pose — a link to the loc demos.
