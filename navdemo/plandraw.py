@@ -10,6 +10,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle as CirclePatch, Patch, Polygon as PolygonPatch, Rectangle
 
+from .planners import path_length
 from .planstate import PlanState, TUNABLES
 from .world import Circle
 
@@ -256,7 +257,6 @@ class Panel:
         if state.planner != "A*":
             if state.planner == "RRT":
                 rows.append(f"         {'stop at 1st path' if state.stop_at_goal else 'all iterations'} (f)")
-        rows.append(f"shortcut: {'on' if state.shortcut else 'off'} (s)")
         if state.execute:
             rows.append(f"execute: on (e), law: {state.law} (c)")
             if state.law == "pure pursuit":
@@ -280,7 +280,11 @@ class Panel:
             what = (f"{len(r.expanded)} cells expanded" if r.expanded
                     else f"{len(r.nodes)} nodes, {r.iterations} iter")
             plen = f"{r.cost:.2f} m" if r.path else "none"
-            rows += [f"plan:   {plen}, {what}", f"        {1000 * r.seconds:.0f} ms"]
+            rows += [f"plan:   {plen}, {1000 * r.seconds:.0f} ms", f"        {what}"]
+            if mission.shortened:
+                rows.append(f"        shortcut: {path_length(mission.path):.2f} m (s: undo)")
+            elif r.path:
+                rows.append("        shortcut: off (s)")
         rows += [f"status: {status}"]
         if state.execute:
             f = mission.follower

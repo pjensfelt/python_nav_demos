@@ -15,7 +15,7 @@ import numpy as np
 
 from navdemo import app, draw, plandraw, plankeys
 from navdemo.mission import Mission
-from navdemo.planners import PLANNERS
+from navdemo.planners import PLANNERS, path_length
 from navdemo.planstate import PlanState, ROBOT_RADIUS, TUNABLE_BY_NAME
 from navdemo.rasterize import sample_outlines
 from navdemo.world import World, builtin_worlds, centre, imperfect, moved, transform_obstacles
@@ -145,6 +145,8 @@ def main():
         (start_mark,) = ax.plot([], [], "o", color="k", mfc="none", ms=8, zorder=7)
         (goal_mark,) = ax.plot([], [], "*", color="gold", mec="k", ms=16, zorder=9)
         robot = draw.RobotArtist(ax)
+        crash_text = ax.text(0, 0, "COLLISION", color="r", fontsize=14, fontweight="bold",
+                             ha="center", va="bottom", zorder=10, visible=False)
         lookahead = draw.GeometryArtist(ax)
         plandraw.add_legend(fig)
         panel = plandraw.Panel(fig)
@@ -217,6 +219,18 @@ def main():
             state.plan = False
             if not mission.driving:
                 do_plan(animate=True)
+        if state.shorten:
+            state.shorten = False
+            if replaying():
+                pass                          # let the search finish first
+            elif mission.driving or mission.t > 0:
+                print("s: shortcut the plan before driving it (r to reset)")
+            elif mission.shorten(cfg):
+                print(f"shortcut: {path_length(mission.path):.2f} m"
+                      f" (planned {mission.result.cost:.2f} m)" if mission.shortened
+                      else f"back to the plan as planned: {mission.result.cost:.2f} m")
+            else:
+                print("s: no path to shortcut (enter to plan)")
         if state.drive:
             state.drive = False
             if mission.done or mission.collided:
@@ -270,7 +284,7 @@ def main():
         show_plan = not replaying()
         path = np.array(mission.path) if (mission.path and show_plan) else np.empty((0, 2))
         plan_line.set_data(path[:, 0], path[:, 1])
-        raw = mission.result.path if (mission.result and state.shortcut and show_plan) else []
+        raw = mission.result.path if (mission.result and mission.shortened and show_plan) else []
         raw = np.array(raw) if raw else np.empty((0, 2))
         raw_line.set_data(raw[:, 0], raw[:, 1])
         while len(old_lines) < len(mission.old_paths):
@@ -290,6 +304,8 @@ def main():
         for h in robot.artists:
             h.set_color("r" if mission.collided else "k")
             h.set_visible(state.execute)
+        crash_text.set_position((mission.robot.x, mission.robot.y + 2.5 * ROBOT_RADIUS))
+        crash_text.set_visible(mission.collided and state.execute)
         if (mission.follower is not None and state.execute and state.show_lookahead
                 and show_plan and state.law != "stop and turn"):
             lookahead.set(mission.follower, cfg["lookahead"], True)

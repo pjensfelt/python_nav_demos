@@ -27,9 +27,10 @@ HELP = """
  x  RRT: grid / exact     0  unrotated, designed      h  this help
  f  RRT: stop at 1st path    start and goal           q  quit
  s  shortcut the path     v  another building variant
- 1..8   world             u / d  known map: fresh
- mouse  left: goal               samples / show them
-        right: start      tab / S-tab  select, > / <  change it
+    (again: as planned)   u / d  known map: fresh
+ 1..8   world                samples / show them
+ mouse  left: goal        tab / S-tab  select, > / <  change it
+        right: start
 
  executing the path (e: on / off)
  --------------------------------
@@ -106,7 +107,7 @@ def make_handler(state: PlanState, fig=None, ax=None, demo="planning"):
         elif k == "f":
             state.stop_at_goal = not state.stop_at_goal
         elif k == "s":
-            state.shortcut = not state.shortcut
+            state.shorten = True
         elif k == "c":
             state.law = _cycle(CONTROL_LAWS, state.law)
         elif k == "b":

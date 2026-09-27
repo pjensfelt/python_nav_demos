@@ -69,7 +69,8 @@ class Mission:
         self.robot = Robot(*self.start)
         self.follower = None
         self.result = None           # the latest PlanResult
-        self.path = []               # the path being driven (after shortcutting)
+        self.path = []               # the path to drive (the plan, or its shortcut)
+        self.shortened = False       # is self.path the shortcut of result.path?
         self.old_paths = []          # earlier plans, for showing the replans
         self.trail = [(self.robot.x, self.robot.y)]
         self.t = 0.0
@@ -116,11 +117,25 @@ class Mission:
         self.result = res
         if self.path:
             self.old_paths.append(self.path)
-        self.path = shortcut(checker, res.path) if (cfg["shortcut"] and res.path) else res.path
+        self.path = res.path          # as planned; 's' shortcuts it (shorten())
+        self.shortened = False
         self.failed = "" if res.path else res.message
         if self.path:
             self._make_follower()
         return res
+
+    def shorten(self, cfg):
+        """Shortcut the current plan -- or, if it already is, go back to the
+        plan as it came from the planner. Only before driving: the follower
+        restarts on the new path."""
+        if self.result is None or not self.result.path:
+            return False
+        if self.shortened:
+            self.path, self.shortened = self.result.path, False
+        else:
+            self.path, self.shortened = shortcut(self.checker(cfg), self.result.path), True
+        self._make_follower()
+        return True
 
     def _make_follower(self):
         """A fresh Follower on the new path, starting from wherever the

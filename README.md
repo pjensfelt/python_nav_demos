@@ -473,8 +473,12 @@ Implementations in `navdemo/planners.py` are kept short to be readable.
   where the grid is all the robot has. The panel's `checks:` line always says
   which check is in use, and pressing `x` prints why when it doesn't apply.
   Like every planner setting, it takes effect when you replan (`enter`).
-- **`s`** shortcuts the path: it jumps to the furthest point still in line of
-  sight (the WASP `optimize_path`). The raw path stays dotted underneath.
+- **`s`** shortcuts the path already planned, with no new search: from each
+  point it jumps to the furthest point still in line of sight (the WASP
+  `optimize_path`). The planned path stays dotted underneath, and the panel
+  gives both lengths. Pressing `s` again goes back to the path as planned.
+  It works before driving (after that, `r` first). A new plan, including a
+  replan while mapping as we go, comes out as planned.
 
 Structure taken from the WASP assignment 3 planners
 (KTH-RPL/wasp_autonomous_systems, branch ht26, `src/wasp_as_ass_3`), with A*
@@ -491,7 +495,7 @@ and `speed` become rows, and `c` cycles the control law, including **stop
 and turn**, which follows the planned path exactly and stops at every
 corner (the panel counts the stops). On an A\* path, with a corner at almost
 every cell, that roughly doubles the time: 34 s instead of 18 s in world 1.
-Shortcutting the path first (`s`) removes most of the corners (21 s). The
+Shortcutting the path before driving (`s`) removes most of the corners (21 s). The
 robot is checked against the real geometry every 20 ms, and stops, red, on
 contact.
 
@@ -543,7 +547,7 @@ close it, and the robot takes the long way (18 m instead of 9 m).
 | `1`…`8` / `v` | world / another variant of the building | `n` | A*: 8 / 4 connectivity |
 | left click | set the goal | `x` | RRT/RRT*: grid / exact geometry |
 | right click | set the start | `f` | RRT: stop at first path / all iterations |
-| `tab` / `shift-tab` | select a parameter | `s` | shortcut the path |
+| `tab` / `shift-tab` | select a parameter | `s` | shortcut the path (again: undo) |
 | `>` / `<` | raise / lower it | `e` | execution (a robot drives the plan) on / off |
 | `c` / `b` | control law / turn in place (pure pursuit) | `a` / `t` | lookahead geometry / trail on/off |
 | `g` / `o` / `y` | grid / real obstacles / search on/off | | |

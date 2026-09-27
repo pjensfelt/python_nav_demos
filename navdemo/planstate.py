@@ -97,7 +97,6 @@ class PlanState:
     eight: bool = True                 # A*: 8- (else 4-) connectivity
     exact_geometry: bool = False       # RRT/RRT*: check the real geometry, not the grid
     stop_at_goal: bool = True          # RRT: stop at the first path found
-    shortcut: bool = False
     law: str = CONTROL_LAWS[0]
     turn_in_place: bool = True         # pure pursuit law: turn on the spot when the target is behind
 
@@ -122,6 +121,7 @@ class PlanState:
     goal: object = None
     newWorld: object = None            # an int (1..9 key) or a World
     plan: bool = False
+    shorten: bool = False              # s: shortcut the current path (or undo it)
     drive: bool = False                # space: start / pause execution
     reset: bool = False
     newStart: object = None
@@ -194,15 +194,15 @@ class PlanState:
     def plan_key(self):
         """Everything the current plan depends on: a change marks it stale."""
         names = [t.name for t in TUNABLES if t.name in _ONLY_FOR and self.relevant(t)]
-        return (self.planner, self.eight, self.uses_exact_geometry, self.stop_at_goal,
-                self.shortcut) + tuple(self.value(n) for n in names)
+        return (self.planner, self.eight, self.uses_exact_geometry,
+                self.stop_at_goal) + tuple(self.value(n) for n in names)
 
     def mission_config(self):
         """Everything Mission and Follower need, as one dict."""
         cfg = dict(FIXED_CONTROL, law=self.law, mapped=self.mapped,
                    planner=self.planner, eight=self.eight,
                    exact_geometry=self.uses_exact_geometry,
-                   stop_at_goal=self.stop_at_goal, shortcut=self.shortcut,
+                   stop_at_goal=self.stop_at_goal,
                    turn_in_place=self.turn_in_place)
         cfg.update({t.name: self.value(t.name) for t in TUNABLES})
         cfg["rays"] = int(cfg["rays"])

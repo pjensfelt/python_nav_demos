@@ -175,10 +175,12 @@ def _cfg(**kw):
     return cfg
 
 
-def _run(world, cfg, seed=0, t_max=150):
+def _run(world, cfg, seed=0, t_max=150, shortcut=False):
     m = Mission(world, ROBOT_RADIUS, np.random.default_rng(seed))
     m.build_map(cfg)
     m.plan(cfg)
+    if shortcut:
+        m.shorten(cfg)
     m.driving = bool(m.path)
     while m.driving and m.t < t_max:
         m.advance(0.1, cfg)
@@ -341,13 +343,30 @@ def test_stop_and_turn_is_exact_but_slow():
     w = World.load("1_gap.json")
     times = {}
     for law, sc in (("pure pursuit", False), ("stop and turn", False), ("stop and turn", True)):
-        m = _run(w, _cfg(law=law, shortcut=sc), t_max=200)
+        m = _run(w, _cfg(law=law), t_max=200, shortcut=sc)
         assert m.done and not m.collided, (law, sc)
         times[(law, sc)] = m.t
         if law == "stop and turn":
             assert m.follower.stops > 0 and m.follower.max_abs_e < 0.05
     assert times[("stop and turn", False)] > 1.5 * times[("pure pursuit", False)]
     assert times[("stop and turn", True)] < times[("stop and turn", False)]
+
+
+@test
+def test_shortcut_key_acts_on_the_current_path():
+    """'s' shortcuts the path already planned -- no new search, the plan
+    stays as it was -- and pressing it again gives the plan back."""
+    w = World.load("1_gap.json")
+    cfg = _cfg()
+    m = Mission(w, ROBOT_RADIUS, np.random.default_rng(0))
+    m.build_map(cfg)
+    res = m.plan(cfg)
+    assert m.path == res.path and not m.shortened
+    assert m.shorten(cfg)
+    assert m.result is res and m.shortened and not m.old_paths
+    assert len(m.path) < len(res.path) and path_length(m.path) <= res.cost + 1e-9
+    m.shorten(cfg)
+    assert m.path == res.path and not m.shortened
 
 
 @test
