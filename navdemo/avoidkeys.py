@@ -24,6 +24,11 @@ HELP = """
  w      people wait for    tab / S-tab  select,     S  screenshot (2 pngs)
         the robot / walk   > / <  change it         h  this help
         blindly                                     q  quit
+
+ local map
+ ---------
+ l      on / off           u  add hits only /       f  forget (fade) on / off
+                              also clear along rays
 """
 
 
@@ -70,6 +75,14 @@ def make_handler(state: AvoidState, fig=None, ax=None, demo="avoid"):
             state.polite = not state.polite
         elif k == "p":
             state.people_on = not state.people_on
+        elif k == "l":
+            state.local_map = not state.local_map
+        elif k == "u":
+            state.map_clear = not state.map_clear
+        elif k == "f":
+            state.map_forget = not state.map_forget
+            if not state.relevant(state.selected):
+                state.cursor = state.visible()[0]
         elif k == "o":
             state.show_geometry = not state.show_geometry
         elif k == "d":

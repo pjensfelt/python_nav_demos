@@ -28,8 +28,8 @@ python3 -m venv .venv
 .venv/bin/python run_avoid.py                   # obstacle avoidance with the lidar
 .venv/bin/python tests/test_grid.py             # checks (grid)
 .venv/bin/python tests/test_navdemo.py          # checks (pure pursuit)
-.venv/bin/python tests/test_planning.py         # checks (planning, a few minutes)
-.venv/bin/python tests/test_avoid.py            # checks (obstacle avoidance, ~1 min)
+.venv/bin/python tests/test_planning.py         # checks (planning, ~2 min)
+.venv/bin/python tests/test_avoid.py            # checks (obstacle avoidance, ~2 min)
 ```
 
 The figure window has to have keyboard focus for the keys to work. Press `h`
@@ -353,7 +353,7 @@ overshot by v²/(2·acc_v): 0.25 m at the defaults. Here the speed is capped by
 a braking profile, v ≤ √(2·a·d) with d the distance left along the path and
 a = acc_v/2. The robot decelerates uniformly over the last stretch and comes
 to rest on the goal, within a couple of centimetres
-(`Follower.brake_for_goal` in `navdemo/sim.py`, shared by both demos).
+(`Follower.brake_for_goal` in `navdemo/sim.py`, shared with the planning demo).
 
 Things to try:
 
@@ -512,8 +512,9 @@ Implementations in `navdemo/planners.py` are kept short to be readable.
   This skips discretization entirely. The obstacles grown by `inflate` (what
   the planner now avoids) are drawn dashed red, and the unused grid is faded.
   It's slower: about 2 s instead of 0.1 s for 2000 RRT* iterations. It does
-  nothing with A\*, which needs cells to search, or while mapping as we go,
-  where the grid is all the robot has. The panel's `checks:` line always says
+  nothing with A\*, which needs cells to search, with the potential field,
+  which checks nothing, or while mapping as we go, where the grid is all the
+  robot has. The panel's `checks:` line always says
   which check is in use, and pressing `x` prints why when it doesn't apply.
   Like every planner setting, it takes effect when you replan (`enter`).
 - **`s`** picks how every plan is smoothed before it is driven, cycling
@@ -570,12 +571,12 @@ passes cost changes on to descendants.
 The demo starts with the planner only: no robot, and none of the execution
 settings. `e` turns execution on, so the lecture can first be about the
 plan and then about following it. The plan is then driven with the same
-code as `run_pure_pursuit.py` (`navdemo/sim.py`): `lookahd`, `v_max`, `kP`
-and `speed` become rows, and `c` cycles the control law, including **stop
+code as `run_pure_pursuit.py` (`navdemo/sim.py`): `lookahd`, `v_max`, `kP`,
+`speed`, `loc_xy` and `loc_th` become rows, and `c` cycles the control law, including **stop
 and turn**, which follows the planned path exactly and stops at every
 corner (the panel counts the stops). On an A\* path, with a corner at almost
 every cell, that roughly doubles the time: 34 s instead of 18 s in world 1.
-Shortcutting the path before driving (`s`) removes most of the corners (21 s). The
+Shortcutting the path (`s` set to shortcut) removes most of the corners (21 s). The
 robot is checked against the real geometry every 20 ms, and stops, red, on
 contact, with COLLISION written above it.
 
@@ -624,6 +625,15 @@ close it, and the robot takes the long way (18 m instead of 9 m).
   robot's route changes a lot more than with A\*.
 * **World 5 (bug trap):** compare how many cells Dijkstra (`h_weight` 0), A\*
   and weighted A\* expand.
+* **World 1, `cost_w` up (A\*):** the red tint shows the cost near the
+  walls, and the plan moves away from them: 0.35 m closest approach at 0,
+  0.99 m at 20, for an 8 % longer path. In world 2 it still takes the door.
+* **`s` through its four settings, world 1:** the spline alone barely helps
+  an A\* path (13.7 1/m at the gap), the shortcut + spline does (4.5 1/m).
+  With `cost_w` 5 the spline alone is the smoothest (1.7 1/m).
+* **`p` to the potential field, `y`:** the shading shows the potential and
+  the line the descent. In world 1 it runs into the middle wall and is stuck
+  there; world 4 (clutter) is the only one it gets through.
 
 ### Keys
 
@@ -632,7 +642,7 @@ close it, and the robot takes the long way (18 m instead of 9 m).
 | `enter` | plan (from where the robot is) | `m` | known map / map as we go |
 | `,` / `.`, `k` / `l` | rotate the world ∓1°, ∓5° | `0` | unrotated, designed start and goal |
 | `u` / `d` | known map: fresh survey / show its points | | |
-| `space` | drive / pause (plans first if needed) | `p` | planner: A* / RRT / RRT* |
+| `space` | drive / pause (plans first if needed) | `p` | planner: A* / RRT / RRT* / potential field |
 | `r` | reset (in mapping mode, a fresh map) | | |
 | `1`…`8` / `v` | world / another variant of the building | `n` | A*: 8 / 4 connectivity |
 | left click | set the goal | `x` | RRT/RRT*: grid / exact geometry |
@@ -640,7 +650,7 @@ close it, and the robot takes the long way (18 m instead of 9 m).
 | `tab` / `shift-tab` | select a parameter | `s` | smooth: spline / shortcut / both / off |
 | `>` / `<` | raise / lower it | `e` | execution (a robot drives the plan) on / off |
 | `c` / `b` | control law / turn in place (pure pursuit) | `a` / `t` | lookahead geometry / trail on/off |
-| `g` / `o` / `y` | grid / real obstacles / search on/off | | |
+| `g` / `o` / `y` | grid / real obstacles / search (and the potential) on/off | | |
 | `S` | screenshot | `h` / `q` | key list / quit |
 
 Rows that don't apply (for example RRT's `step` while A\* is selected, or the
@@ -654,6 +664,7 @@ marks the plan as stale until you press `enter`.
 .venv/bin/python run_planning.py --world 2 --set res=0.5 --planner "RRT*" --exact --seed 1   # through the door the grid closed
 .venv/bin/python run_planning.py --world 8 --mapped                   # into the dead end and out
 .venv/bin/python run_planning.py --world 4 --planner "RRT*" --seed 2
+.venv/bin/python run_planning.py --world 4 --planner "potential field"  # the one world it gets through
 .venv/bin/python run_planning.py --headless --world 8 --mapped        # plan, drive, print a summary
 ```
 
@@ -661,7 +672,8 @@ marks the plan as stale until you press `enter`.
 `sample_sigma`, `min_hits`, `sensor_range`, `rays`,
 `noise`, `h_weight`, `cost_weight`, `cost_sigma`, `iterations`, `step`, `goal_bias`, `radius`,
 `spline_spacing`, `k_rep`, `d0`, `anim`,
-`lookahead`, `vmax`, `kp`, `time_scale`). Other options are `--rotate DEG`, `--exact`,
+`lookahead`, `vmax`, `kp`, `time_scale`, `loc_xy`, `loc_th`), with angles in degrees.
+Other options are `--planner "A*"|RRT|"RRT*"|"potential field"`, `--rotate DEG`, `--exact`,
 `--execute` (start with execution on), `--law pure-pursuit|stop-and-turn`,
 `--no-turn-in-place`, `--smooth spline|shortcut|shortcut+spline` (start with
 this smoothing, as `s`),
@@ -676,7 +688,8 @@ name order. The format is described at the top of `navdemo/world.py`.
 ## Obstacle avoidance (`run_avoid.py`)
 
 Local, reactive methods: each control step (10 Hz) they turn the latest
-lidar scan and a goal into speed commands, with no map and no memory. The
+lidar scan and a goal into speed commands, with no global map. By default
+they have no memory either; the local map (`l`, below) gives them one. The
 robot then follows the commands as far as its acceleration limits allow.
 
 The worlds (`worlds/avoid/`, keys `1`…`4`) have three kinds of obstacle:
@@ -736,8 +749,12 @@ its limits whatever the method. `a` shows each method's own picture.
   hits within `vfh_win` (or less near the goal) go into a polar histogram
   of 5° sectors, more the closer they are, each spread over the sectors
   the robot would sweep passing it at a safe distance. Sectors below
-  `vfh_thr` are free. It heads for the free sector closest to the goal's
-  direction that is at least 10° from any blocked one. The picture: the
+  `vfh_thr` are free, and runs of free sectors are valleys. In a wide
+  valley (40° or more) it heads for the goal if the goal lies at least 10°
+  inside it, else for the valley's direction closest to the goal, 10° in
+  from its edge; a narrow valley (a door) it goes through the middle of. Of
+  all valleys it takes the one whose direction is closest to the goal's.
+  The picture: the
   histogram as bars round the robot (green free, red blocked), the goal's
   direction dashed and the chosen one blue.
 
@@ -751,18 +768,70 @@ methods can avoid when it happens from the side or behind: they all assume
 the world stands still between scans. `people` scales their speed (0 =
 they stand still), and `p` takes them out of the world altogether.
 
+### The local map (`l`, `u`, `f`) and the field of view (`fov`)
+
+Off (the default), the methods get only the latest scan, and whatever the
+lidar doesn't see right now doesn't exist. `l` turns on a **local map**: a
+6 × 6 m grid of 0.1 m cells that moves with the robot but stays aligned with
+the world, so a remembered obstacle stays where it is. Each cell holds a
+certainty from 0 to 1, drawn purple (darker = more certain) inside a dashed
+window. The methods then get the map's cells instead of the hits: DWA the
+cells more likely occupied than not, the potential field and VFH every cell
+weighted by its certainty. VFH was originally built on exactly such a
+certainty grid. Turning it off and on again starts it empty.
+
+How it updates, every scan:
+- **`u`: add hits only** (the default when it's on) or **also clear along
+  the rays**, which sets every cell a ray passes through, up to its hit,
+  back to free.
+- **`f`: forget** off or on. On, every cell fades by half every `forget`
+  seconds (5 s by default).
+- The cells the hits land in are set to 1.
+
+`fov` narrows the lidar to a sector centred on the heading (360° by
+default, down to 60°), like a forward-facing sensor. Its edges are drawn
+as thin red lines.
+
+VFH (the default method), the worlds as drawn, 90 s at most:
+
+| world | goal | fov | map off | hits only | + clearing | + forgetting | clearing + forgetting |
+|---|---|---|---|---|---|---|---|
+| corridor | clicked | 360° | 20 s | stuck | 20 s | stuck | 20 s |
+| corridor | A\* carrot | 360° | 20 s | stuck | 20 s | stuck | 20 s |
+| corridor | A\* carrot | 90° | **hits a person** | stuck | 34 s | 74 s | 61 s |
+| office | A\* carrot | 360° | 30 s | stuck | 33 s | stuck | 33 s |
+| hall | A\* carrot | 360° | 17 s | stuck | 17 s | stuck | 17 s |
+| hall | A\* carrot | 90° | 17 s | stuck | 17 s | 39 s | 17 s |
+
+- **A map that only adds fills up with ghosts.** Every person leaves a trail
+  of occupied cells behind, and the robot gets stuck behind trails that are
+  no longer there: in the office the trail of the person who walked through
+  the door blocks it.
+- **Clearing along the rays removes the ghosts** as soon as the robot looks
+  at the spot again. With a 360° lidar the result is then as good as no map.
+- **Forgetting alone is too slow here:** a 5 s half-life keeps a trail long
+  enough to block a corridor, and only sometimes lets the robot through in
+  the end.
+- **With a narrow field of view, memory matters:** at 90° in the corridor,
+  the robot with no map hits a person; with the map clearing along the rays
+  it gets through (34 s). What goes out of view beside the robot is still
+  in the map.
+- In the trap the local map changes nothing (a global problem stays a
+  global problem), and with a 90° field of view the office defeats every
+  setting.
+
 ### Measured
 
-The worlds as drawn, 90 s at most:
+The worlds as drawn, 90 s at most, 360° field of view, no local map:
 
 | world | goal | potential field | DWA | VFH |
 |---|---|---|---|---|
-| corridor | clicked | 32 s (grazes, 0.00 m) | 58 s | 51 s |
-| corridor | A\* carrot | hits a person | 45 s | 53 s |
+| corridor | clicked | 32 s (grazes, 0.00 m) | 58 s | 20 s |
+| corridor | A\* carrot | hits a person | 45 s | 20 s |
 | trap | clicked | stuck | stuck | stuck |
 | trap | A\* carrot | 16 s | 20 s | 15 s |
 | office | clicked | stuck | stuck | stuck |
-| office | A\* carrot | stuck by the trolley | 72 s | 33 s |
+| office | A\* carrot | stuck by the trolley | 72 s | 31 s |
 | hall | clicked | hits the first pillar | 16 s | 17 s |
 | hall | A\* carrot | 17 s | 21 s | 17 s |
 
@@ -775,9 +844,7 @@ The worlds as drawn, 90 s at most:
   fast to stop.
 - **DWA and VFH with a carrot get through every world,** people and
   unmapped obstacles included.
-- VFH's threshold matters: with the carrot and `vfh_thr` 1 it can't get through the
-  office doors (the jambs block every direction), with 2 (the default) it
-  can.
+- In the corridor VFH is much the fastest: 20 s, against DWA's 45–58 s.
 
 ### Keys
 
@@ -788,7 +855,8 @@ The worlds as drawn, 90 s at most:
 | `c` | method | `a` | the method's picture |
 | `m` | clicked goal / A\* carrot | `t` | driven trail |
 | `w` | people wait / walk blindly | `g` | the map (A\* carrot) |
-| `p` | people on / off | | |
+| `p` | people on / off | `l` | local map on / off |
+| `u` | local map: add hits only / also clear along rays | `f` | local map: forget on / off |
 | `1`…`4` | world | `S` | screenshot |
 | left / right click | goal / start | `h` | help |
 | `tab` / `shift-tab` | select a parameter | `q` | quit |
@@ -803,9 +871,11 @@ The worlds as drawn, 90 s at most:
 ```
 
 `--set` takes any row name (`vmax`, `wmax`, `accv`, `accw`, `sensor_range`,
-`rays`, `people`, `carrot`, `k_rep`, `d0`, `horizon`, `w_head`, `w_clear`,
-`w_vel`, `vfh_win`, `vfh_thr`, `time_scale`), with angles in degrees.
-Other options are `--blind`, `--no-people`, `--seed N`, `--snapshot FILE.png` and
+`rays`, `fov`, `people`, `carrot`, `k_rep`, `d0`, `horizon`, `w_head`,
+`w_clear`, `w_vel`, `vfh_win`, `vfh_thr`, `half_life`, `time_scale`), with
+angles in degrees. Other options are `--local-map
+hits|clear|hits+forget|clear+forget` (start with the local map on),
+`--blind`, `--no-people`, `--seed N`, `--snapshot FILE.png` and
 `--steps N`.
 
 ## Layout
@@ -826,15 +896,16 @@ navdemo/grid.py        occupancy grid from the world, line traversal, collision 
 navdemo/rasterize.py   grid demo cells: exact any overlap, samples, center; inflation; moving the world
 navdemo/gridstate.py   grid demo parameters, state, keys and mouse
 navdemo/griddraw.py    grid demo drawing: cells, obstacles, probes, panel
-navdemo/mapping.py     lidar and the grid that is built as the robot goes
+navdemo/mapping.py     lidar (with a field of view) and the grid built as the robot goes
 navdemo/planners.py    A*, RRT, RRT*, potential field, shortcutting, splines
 navdemo/mission.py     plan -> drive -> sense -> replan, collisions with the real world
 navdemo/planstate.py   planning parameter ladders and state
 navdemo/plandraw.py    planning drawing: obstacles, grid, search, scan, panel
 navdemo/plankeys.py    planning keyboard and mouse
-navdemo/avoid.py       avoidance: worlds with unmapped obstacles and people, the methods, the loop
+navdemo/avoid.py       avoidance: worlds with unmapped obstacles and people, the methods,
+                       the local map, the loop
 navdemo/avoidstate.py  avoidance parameter ladders and state
-navdemo/avoiddraw.py   avoidance drawing: people, forces, DWA arcs, VFH histogram, panel
+navdemo/avoiddraw.py   avoidance drawing: people, forces, DWA arcs, VFH histogram, local map, panel
 navdemo/avoidkeys.py   avoidance keyboard and mouse
 paths/                 path1..4.csv from the MATLAB demo, plus any you save
 worlds/                world files for run_planning.py

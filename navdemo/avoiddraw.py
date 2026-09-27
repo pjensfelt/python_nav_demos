@@ -63,6 +63,54 @@ class PeopleArtist:
             p.set_visible(visible)
 
 
+C_LOCAL = (0.45, 0.2, 0.6)        # the local map's cells, by certainty
+
+
+class LocalMapArtist:
+    """The local map: its cells shaded by certainty, and its window."""
+
+    def __init__(self, ax):
+        self.ax = ax
+        self.im = None
+        (self.box,) = ax.plot([], [], color=C_LOCAL, lw=1, ls="--", zorder=4)
+
+    def set(self, local, visible):
+        if not visible or local.i0 is None:
+            if self.im is not None:
+                self.im.set_visible(False)
+            self.box.set_data([], [])
+            return
+        img = np.zeros((local.n, local.n, 4))
+        img[..., :3] = C_LOCAL
+        img[..., 3] = 0.75 * local.c
+        img = img.transpose(1, 0, 2)
+        if self.im is None:
+            self.im = self.ax.imshow(img, origin="lower", extent=local.extent,
+                                     interpolation="nearest", zorder=4)
+        else:
+            self.im.set_data(img)
+            self.im.set_extent(local.extent)
+        self.im.set_visible(True)
+        x0, x1, y0, y1 = local.extent
+        self.box.set_data([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0])
+
+
+class FovArtist:
+    """The edges of the sensor's field of view, when it isn't all round."""
+
+    def __init__(self, ax):
+        (self.lines,) = ax.plot([], [], color="r", lw=0.8, alpha=0.6, zorder=7)
+
+    def set(self, pose, fov, rng):
+        if fov >= 2 * np.pi - 1e-9:
+            self.lines.set_data([], [])
+            return
+        x, y, a = pose
+        l, r = a + fov / 2, a - fov / 2
+        self.lines.set_data([x + rng * np.cos(l), x, x + rng * np.cos(r)],
+                            [y + rng * np.sin(l), y, y + rng * np.sin(r)])
+
+
 class MethodArtist:
     """What the method is looking at."""
 
@@ -143,6 +191,9 @@ class Legend:
             e.append(Patch(facecolor=(*C_PERSON, 0.8), edgecolor="k", label="person"))
         if state.show_scan:
             e.append(Line2D([], [], color="r", marker=".", lw=0, ms=4, label="lidar hit"))
+        if state.local_map:
+            e.append(Patch(facecolor=(*C_LOCAL, 0.6), edgecolor=C_LOCAL, ls="--",
+                           label="local map (darker = more certain)"))
         if state.goal_mode == GOAL_MODES[1] and sim.plan is not None:
             if state.show_map:
                 e.append(Patch(facecolor=(0.55, 0.60, 0.80, 0.45), label="map (A*'s view)"))
@@ -189,6 +240,9 @@ class Panel:
                 f"goal:    {state.goal_mode} (m)",
                 (f"people:  {'wait for the robot' if state.polite else 'walk blindly'} (w), on (p)"
                  if state.people_on else "people:  off (p)"),
+                (f"local:   on (l), {'hits + clearing' if state.map_clear else 'hits only'} (u), "
+                 f"forget {'on' if state.map_forget else 'off'} (f)" if state.local_map
+                 else "local:   off -- latest scan only (l)"),
                 "", "          VALUE", "          -----"]
         vis = state.visible()
         for i, t in enumerate(TUNABLES):

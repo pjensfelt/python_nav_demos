@@ -205,12 +205,14 @@ def steer(pose, heading, cfg):
     return v, w, err
 
 
-def potential_field_cmd(pose, hits, goal, cfg, robot_radius):
-    """The goal pulls (strength 1, less within 1 m of it); each lidar hit
-    within d0 pushes, k_rep * (1/rho - 1/d0) / rho^2 with rho the gap
-    between the robot's edge and the hit, weighted by the stretch of
-    surface that ray stands for (its angular step times its range), so the
-    number of rays doesn't change the push. Steer along the sum."""
+def potential_field_cmd(pose, hits, goal, cfg, robot_radius, weights=None):
+    """The goal pulls (strength 1, less within 1 m of it); each obstacle
+    point within d0 pushes, k_rep * (1/rho - 1/d0) / rho^2 with rho the gap
+    between the robot's edge and the point, weighted by the stretch of
+    surface the point stands for (`weights` [m]: for a lidar hit its angular
+    step times its range, for a local map cell its size times its
+    certainty), so neither the ray count nor the cell size changes the
+    push. Steer along the sum."""
     x = np.array(pose[:2])
     g = np.asarray(goal) - x
     f_att = g / max(np.hypot(*g), 1.0)
@@ -221,7 +223,8 @@ def potential_field_cmd(pose, hits, goal, cfg, robot_radius):
         rho = np.maximum(d - robot_radius, 0.01)
         near = rho < cfg["d0"]
         if near.any():
-            weight = (2 * np.pi / cfg["rays"]) * d[near]
+            weight = (weights[near] if weights is not None
+                      else (2 * np.pi / cfg["rays"]) * d[near])
             mag = cfg["k_rep"] * weight * (1 / rho[near] - 1 / cfg["d0"]) / rho[near] ** 2
             f_rep = (mag / np.maximum(d[near], 1e-9)) @ dv[near]
     f = f_att + f_rep
@@ -316,18 +319,22 @@ def dwa_cmd(pose, vel, hits, goal, cfg, robot_radius, ctrl_dt, nv=7, nw=15, cap=
     return best[0], best[1], {"arcs": arcs, "ok": info, "best": best_i}
 
 
-def vfh_cmd(pose, hits, goal, cfg, robot_radius, sector_deg=5.0):
+def vfh_cmd(pose, hits, goal, cfg, robot_radius, sector_deg=5.0, weights=None):
     """The vector field histogram (Borenstein & Koren 1991), simplified.
 
     Every hit within the window (`vfh_win`, or less near the goal: nothing
     beyond the goal matters) adds to the sector of its direction -- more
     the closer it is (1 - d / window) -- spread over the sectors the robot
     would sweep passing it at a safe distance. Sectors
-    below the threshold are free. Head for the centre of the free sector
-    closest to the goal's direction that is at least a few sectors from any
-    blocked one (so the robot doesn't graze a gap's edge); if there is
-    none, the free sector closest to the goal; if nothing is free, stop and
-    turn towards the goal."""
+    below the threshold are free, and runs of free sectors are valleys:
+    head for the goal through a wide valley (keeping clear of its edges), or
+    through the middle of a narrow one (_vfh_direction); if nothing is free,
+    stop and turn towards the goal.
+
+    Each point counts by the stretch of surface it stands for (`weights`,
+    as for the potential field) relative to a hit of a 180-ray scan at the
+    same range -- so a scan and a local map give the same histogram, and
+    a faded map cell counts less, as in the original certainty grid."""
     n = int(round(360 / sector_deg))
     width = 2 * np.pi / n
     hist = np.zeros(n)
@@ -335,13 +342,15 @@ def vfh_cmd(pose, hits, goal, cfg, robot_radius, sector_deg=5.0):
     # near the goal, what lies beyond it doesn't matter
     dg = np.hypot(goal[0] - x[0], goal[1] - x[1])
     win = min(cfg["vfh_win"], dg + robot_radius + SAFETY)
-    scale = 180.0 / cfg["rays"]         # the same histogram whatever the ray count
     if len(hits):
         dv = hits - x
         d = np.hypot(dv[:, 0], dv[:, 1])
+        if weights is None:
+            weights = (2 * np.pi / cfg["rays"]) * d
+        ref = (2 * np.pi / 180) * np.maximum(d, 0.05)    # a 180-ray hit at that range
         near = d < win
-        for (dx, dy), dd in zip(dv[near], d[near]):
-            m = scale * (1 - dd / cfg["vfh_win"])
+        for (dx, dy), dd, wt, rf in zip(dv[near], d[near], weights[near], ref[near]):
+            m = wt / rf * (1 - dd / cfg["vfh_win"])
             ang = np.arctan2(dy, dx)
             half = np.arcsin(min((robot_radius + SAFETY) / max(dd, 1e-6), 1.0))
             k0 = int(np.floor((ang - half + np.pi) / width))
@@ -351,24 +360,141 @@ def vfh_cmd(pose, hits, goal, cfg, robot_radius, sector_deg=5.0):
     free = hist < cfg["vfh_thr"]
     centres = -np.pi + (np.arange(n) + 0.5) * width
     to_goal = np.arctan2(goal[1] - x[1], goal[0] - x[0])
-    diff = np.abs(wrap_angle(centres - to_goal))
-    margin = 2
-    blocked = ~free
-    safe = free.copy()
-    for s in range(1, margin + 1):
-        safe &= ~np.roll(blocked, s) & ~np.roll(blocked, -s)
-    choice = None
-    for cand in (safe, free):
-        if cand.any():
-            choice = int(np.argmin(np.where(cand, diff, np.inf)))
-            break
+    choice = _vfh_direction(free, centres, width, to_goal)
     if choice is None:
         err = wrap_angle(to_goal - pose[2])
         return 0.0, float(np.sign(err) * cfg["wmax"]), {"hist": hist, "free": free,
                                                         "choice": None, "goal_dir": to_goal}
-    heading = to_goal if (free[choice] and diff[choice] < width / 2) else centres[choice]
-    v, w, _ = steer(pose, heading, cfg)
-    return v, w, {"hist": hist, "free": free, "choice": heading, "goal_dir": to_goal}
+    v, w, _ = steer(pose, choice, cfg)
+    return v, w, {"hist": hist, "free": free, "choice": choice, "goal_dir": to_goal}
+
+
+def _vfh_direction(free, centres, width, to_goal, wide=8, margin=2):
+    """VFH's choice of direction from the free sectors, by valleys (runs of
+    free sectors). In a wide valley (at least `wide` sectors), the direction
+    closest to the goal that is at least `margin` sectors from the valley's
+    edges -- or the goal itself if it lies there. In a narrow valley (a
+    door), its middle. Of all the valleys' candidates, the one closest to
+    the goal. None if nothing is free."""
+    n = len(free)
+    if not free.any():
+        return None
+    if free.all():
+        return to_goal
+    goal_k = int(np.floor((wrap_angle(to_goal) + np.pi) / width)) % n
+    # rotate so that index 0 is blocked, then valleys don't wrap round
+    start = int(np.flatnonzero(~free)[0])
+    order = (np.arange(n) + start) % n
+    f = free[order]
+    cands = []
+    k = 0
+    while k < n:
+        if not f[k]:
+            k += 1
+            continue
+        j = k
+        while j < n and f[j]:
+            j += 1
+        idx = order[k:j]                     # one valley, in angular order
+        if len(idx) >= wide:
+            inner = idx[margin:len(idx) - margin]
+            if goal_k in inner:
+                cands.append(to_goal)        # the goal is in the valley's safe part
+            else:
+                lo, hi = centres[inner[0]], centres[inner[-1]]
+                cands.append(lo if abs(wrap_angle(to_goal - lo)) < abs(wrap_angle(to_goal - hi))
+                             else hi)
+        else:
+            mid = centres[idx[0]] + wrap_angle(centres[idx[-1]] - centres[idx[0]]) / 2
+            cands.append(mid)
+        k = j
+    return min(cands, key=lambda c: abs(wrap_angle(c - to_goal)))
+
+
+
+
+# ==========================================================================
+# The local map
+# ==========================================================================
+
+class LocalMap:
+    """A small grid that moves with the robot and remembers what the lidar
+    has seen: `size` x `size` metres of `res` cells, centred on the robot
+    but aligned with the world, so a remembered obstacle stays where it is
+    as the robot drives (the pose is exact in this demo; on a real robot
+    odometry drift would smear it).
+
+    Each cell holds a certainty in [0, 1]. Every scan:
+      - forget (optional): every cell fades by half every `half_life` s;
+      - clear along rays (optional): the cells each ray passes through,
+        up to its hit, are set to 0 -- what the robot can see through is
+        free now;
+      - the cells the hits land in are set to 1.
+    With neither option the map only ever adds: people leave trails, and a
+    doorway someone stood in stays blocked. Cells that leave the window as
+    the robot moves on are dropped."""
+
+    def __init__(self, size=6.0, res=0.1):
+        self.res = res
+        self.n = int(round(size / res))
+        self.c = np.zeros((self.n, self.n))
+        self.i0 = self.j0 = None          # world cell index of self.c[0, 0]
+
+    def clear(self):
+        self.c[:] = 0.0
+        self.i0 = self.j0 = None
+
+    def recenter(self, x, y):
+        i0 = int(np.floor(x / self.res)) - self.n // 2
+        j0 = int(np.floor(y / self.res)) - self.n // 2
+        if self.i0 is not None and (i0, j0) != (self.i0, self.j0):
+            di, dj = i0 - self.i0, j0 - self.j0
+            new = np.zeros_like(self.c)
+            n = self.n
+            if abs(di) < n and abs(dj) < n:
+                src = self.c[max(di, 0):n + min(di, 0), max(dj, 0):n + min(dj, 0)]
+                new[max(-di, 0):n + min(-di, 0), max(-dj, 0):n + min(-dj, 0)] = src
+            self.c = new
+        self.i0, self.j0 = i0, j0
+
+    def index(self, P):
+        """Local cell indices of world points P (N x 2), and which are inside."""
+        i = np.floor(P[:, 0] / self.res).astype(int) - self.i0
+        j = np.floor(P[:, 1] / self.res).astype(int) - self.j0
+        inside = (i >= 0) & (i < self.n) & (j >= 0) & (j < self.n)
+        return i, j, inside
+
+    def update(self, pose, scan, cfg, dt):
+        x, y, _ = pose
+        self.recenter(x, y)
+        if cfg.get("map_forget", False):
+            self.c *= 0.5 ** (dt / cfg["half_life"])
+        ang, rng_, hit = scan
+        if cfg.get("map_clear", False):
+            # points every half cell along each ray, stopping short of its hit
+            t = np.arange(0.0, rng_.max() + 1e-9, self.res / 2)
+            T = t[None, :]
+            ok = T < (rng_[:, None] - np.where(hit, self.res, 0.0)[:, None])
+            P = np.column_stack([(x + T * np.cos(ang)[:, None])[ok],
+                                 (y + T * np.sin(ang)[:, None])[ok]])
+            i, j, inside = self.index(P)
+            self.c[i[inside], j[inside]] = 0.0
+        H = np.column_stack([x + rng_[hit] * np.cos(ang[hit]), y + rng_[hit] * np.sin(ang[hit])])
+        i, j, inside = self.index(H)
+        self.c[i[inside], j[inside]] = 1.0
+
+    def cells(self, threshold):
+        """Centres and certainties of the cells above `threshold`."""
+        i, j = np.nonzero(self.c > threshold)
+        if self.i0 is None or not len(i):
+            return np.empty((0, 2)), np.empty(0)
+        P = np.column_stack([(i + self.i0 + 0.5) * self.res, (j + self.j0 + 0.5) * self.res])
+        return P, self.c[i, j]
+
+    @property
+    def extent(self):
+        x0, y0 = self.i0 * self.res, self.j0 * self.res
+        return (x0, x0 + self.n * self.res, y0, y0 + self.n * self.res)
 
 
 # ==========================================================================
@@ -408,6 +534,8 @@ class AvoidSim:
         self.viz = {}
         self.scan = None
         self.hits = np.empty((0, 2))
+        self.hit_weights = np.empty(0)
+        self.local = LocalMap()
         self.min_clear = np.inf
         self._next_ctrl = 0.0
         self._best = (np.inf, 0.0)       # (closest to the goal so far, when)
@@ -441,26 +569,44 @@ class AvoidSim:
 
     def sense(self, cfg):
         self.world.people_on = cfg.get("people_on", True)
-        lidar = Lidar(cfg["sensor_range"], int(cfg["rays"]), 0.0, self.rng)
+        fov = cfg.get("fov", 2 * np.pi)
+        lidar = Lidar(cfg["sensor_range"], int(cfg["rays"]), 0.0, self.rng, fov)
         ang, rng_, hit = lidar.scan(self.world, self.robot.x, self.robot.y, self.robot.a)
         self.scan = (ang, rng_, hit)
         x, y = self.robot.x, self.robot.y
         self.hits = np.column_stack([x + rng_[hit] * np.cos(ang[hit]),
                                      y + rng_[hit] * np.sin(ang[hit])])
+        # the stretch of surface each hit stands for: angular step x range
+        step = fov / (int(cfg["rays"]) - (0 if fov >= 2 * np.pi - 1e-9 else 1))
+        self.hit_weights = step * rng_[hit]
+
+    def obstacles(self, cfg):
+        """What the method gets: the latest scan's hits, or -- with the local
+        map on -- its cells. Returns (points, weights [m], points for DWA):
+        DWA needs yes/no obstacles, so it gets the cells that are more
+        likely occupied than not."""
+        if not cfg.get("local_map", False):
+            self.local.clear()          # switched on again, it starts empty
+            return self.hits, self.hit_weights, self.hits
+        self.local.update(self.robot.pose, self.scan, cfg, self.CTRL_DT)
+        pts, c = self.local.cells(0.05)
+        return pts, self.local.res * c, pts[c >= 0.5]
 
     def control(self, cfg):
         self.sense(cfg)
+        pts, wts, binary = self.obstacles(cfg)
         pose = self.robot.pose
         self.carrot = self.local_goal(cfg)
         m = cfg["method"]
         if m == "potential field":
-            v, w, self.viz = potential_field_cmd(pose, self.hits, self.carrot, cfg,
-                                                 self.robot_radius)
+            v, w, self.viz = potential_field_cmd(pose, pts, self.carrot, cfg,
+                                                 self.robot_radius, wts)
         elif m == "DWA":
-            v, w, self.viz = dwa_cmd(pose, (self.robot.v, self.robot.w), self.hits,
+            v, w, self.viz = dwa_cmd(pose, (self.robot.v, self.robot.w), binary,
                                      self.carrot, cfg, self.robot_radius, self.CTRL_DT)
         else:
-            v, w, self.viz = vfh_cmd(pose, self.hits, self.carrot, cfg, self.robot_radius)
+            v, w, self.viz = vfh_cmd(pose, pts, self.carrot, cfg, self.robot_radius,
+                                     weights=wts)
         # brake into the goal itself, as the other demos do, and stop on it
         dg = np.hypot(self.goal[0] - pose[0], self.goal[1] - pose[1])
         v = min(v, np.sqrt(2 * 0.5 * cfg["accv"] * max(dg - 0.05, 0.0)))

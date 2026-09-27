@@ -1,9 +1,8 @@
 # Status of the navigation demos
 
-Written 2026-09-26, at the end of a long working session, so that nothing
-important is lost. **README.md** is the full reference for what each demo
-does (keys, parameters, numbers, things to try); **IDEAS.md** holds the ideas
-and design discussions not built yet. This file says where things stand,
+Last updated 2026-09-27. **README.md** is the full reference for what each
+demo does (keys, parameters, measured numbers, things to try); **IDEAS.md**
+holds the ideas and design discussions. This file says where things stand,
 what was decided and why, and what comes next.
 
 ## The setup
@@ -14,12 +13,13 @@ what was decided and why, and what comes next.
   parent folder, which is not a repo itself. The two repos share nothing:
   `navdemo/` does not import `locdemo/`; the few helpers both need are
   copied.
-- Each repo has its own `.venv`. Always run nav demos from inside
-  `python_nav_demos/` with `.venv/bin/python ...` (running from the parent
-  folder fails: there is no `.venv` there).
-- Tests: `tests/test_grid.py`, `tests/test_navdemo.py` (pure pursuit),
-  `tests/test_planning.py`. No framework, just `python tests/<file>.py`. The
-  planning suite is slow (a few minutes: it drives every world several ways).
+- Each repo has its own `.venv`; use `python_nav_demos/.venv/bin/python`,
+  from inside `python_nav_demos/`. Patric himself runs the demos with the
+  system `python3` (3.9.6, numpy 2.0.2, matplotlib 3.9.4 -- the same versions
+  as the venv), so the code must work there too.
+- Tests, no framework, `python tests/<file>.py`: `test_grid.py` (22),
+  `test_navdemo.py` (pure pursuit, 14), `test_planning.py` (30, ~2 min),
+  `test_avoid.py` (14, ~2 min). All pass.
 - The course is DD2410 at KTH; the lecture is `Lecture12_dd2410_Navigation.pdf`
   (66 slides). Patric's part is about the **real-world aspects** of
   navigation -- the students have already seen A*/RRT in known worlds.
@@ -38,68 +38,48 @@ what was decided and why, and what comes next.
    partition with a doorway. Finished for now.
 2. **`run_pure_pursuit.py` -- following a path.** Port of the MATLAB
    `matlab_pure_pursuit` demo: three control laws (`c`: heading-P as in the
-   MATLAB demo, classic pure pursuit, and stop and turn), lookahead and the
-   other controller settings, the four MATLAB paths, drawing your own path
-   with the mouse. Braking into the goal, turn-in-place (`b`). The MATLAB
+   MATLAB demo, classic pure pursuit, and stop and turn), lookahead down to
+   1 cm, the other controller settings, the four MATLAB paths, drawing your
+   own path. Braking into the goal, turn-in-place (`b`), **localization
+   jitter** (`loc_xy`, `loc_th`; the believed pose drawn dashed purple). Rows
+   the control law doesn't use are left blank and skipped by tab. The MATLAB
    heading-integration bug is fixed (defaults kP 10, acc_w 3600°/s²
-   reproduce what the MATLAB demo actually did). Finished, apart from the
-   idea of adding noise (see IDEAS.md).
+   reproduce what the MATLAB demo actually did). Finished.
 3. **`run_planning.py` -- planning on a grid, driving in the real world.**
    Known map (made from samples, as the grid demo's samples rule) or map as
    you go (`m`: lidar, two layers: the map proper and a planning map
-   regenerated from it by inflation, replanning). A*, RRT, RRT* (`p`),
-   exact-geometry checks for RRT (`x`), shortcutting (`s`), the imperfect
-   building, rotating the world under the grid (`,` `.` `k` `l`, `0`).
-   **Execution is off at the start** (`e`): first the planner, then how to
-   follow its path, with the three control laws (stop and turn shows why
-   pure pursuit or smoothing is needed).
-4. **`run_avoid.py` -- obstacle avoidance with only the lidar** (built
-   2026-09-27). Kept separate from the planning demo,
-   which is full enough: this one is local and reactive, with things the map
-   doesn't have. Worlds in `worlds/avoid/` (corridor, trap, office, hall)
-   with obstacles in the map, obstacles NOT in the map, and people walking
-   back and forth (by default they wait for the robot and give way after
-   2 s; `w` makes them walk blindly, `p` takes them out). Methods (`c`):
-   VFH (the default), potential field, DWA, each with its own picture (`a`). Goal (`m`): clicked (you are the
-   global planner) or a carrot along an A* path on the map. The methods use
-   only the latest scan -- no local map yet (see next steps).
-
-## Latest changes
-
-Everything is committed and pushed (tested, all tests pass). Since the
-first version of this file (2026-09-27):
-- **`s` shortcuts the existing plan** in the planning demo (no new search;
-  `s` again restores it; only before driving), and a red **COLLISION**
-  label above the robot;
-- **localization jitter** (`loc_xy`, `loc_th`) in both demos: fresh
-  Gaussian noise on the pose the controller uses at every control step, no
-  drift (Patric: drift would be too hard to handle). The estimate is drawn
-  as a dashed purple robot. Stop and turn now counts a corner as reached
-  when it has got that far along the leg, so it copes with jitter up to
-  about 5 cm;
-- **lookaheads down to 1 cm** (1, 3, 5, 7 cm) in both demos, to show
-  absurdly small values;
-- the pure pursuit demo **hides the rows the control law doesn't use**
-  (blank gaps keep the layout; tab skips them), and takes
-  `--law stop-and-turn`; the planning demo's `--set` takes angles in degrees;
-- planning demo, later on 2026-09-27: a **cost for driving near obstacles**
-  for A* (`cost_w`, `cost_sig`: the planning map blurred with a Gaussian,
-  shown as a red tint as soon as it's on); **`s` is now a smoothing setting**
-  (as planned / spline / shortcut / shortcut + spline) applied to every plan
-  and replan, changeable while driving (then it smooths the rest from the
-  robot); a **B-spline** (`spline` = control-point spacing, tightened locally
-  where it hits the map, max curvature on the panel); a **potential field**
-  planner on the known map's sample points (`k_rep`, `d0`; shading of the
-  potential with `y`; stuck in every world but clutter); the **legend lists
-  only what's on screen**; cell borders drawn at 0.1 m cells; replay 1 s by
-  default; a crash with the goal in an occupied cell fixed.
-Check `git -C python_nav_demos status` when resuming anyway.
+   regenerated from it by inflation, replanning). Planners (`p`): A* (with
+   an optional **cost near obstacles**, `cost_w` / `cost_sig`, a Gaussian blur
+   of the planning map shown as a red tint), RRT, RRT* (exact-geometry
+   checks with `x`), and a **potential field** on the known map's sample
+   points (`k_rep`, `d0`; the potential shaded with `y`). **Smoothing** (`s`,
+   a setting applied to every plan and replan): as planned / B-spline /
+   shortcut / shortcut + spline, with max curvature on the panel. The
+   imperfect building, rotating the world under the grid (`,` `.` `k` `l`,
+   `0`). **Execution is off at the start** (`e`): first the planner, then how
+   to follow its path, with the three control laws and localization jitter.
+   The legend lists only what is on screen.
+4. **`run_avoid.py` -- obstacle avoidance with only the lidar.** Kept
+   separate from the planning demo, which is full enough: this one is local
+   and reactive, with things the map doesn't have. Worlds in `worlds/avoid/`
+   (corridor, trap, office, hall) with obstacles in the map, obstacles NOT in
+   the map, and people walking back and forth (by default they wait for the
+   robot and give way after 2 s; `w` makes them walk blindly, `p` takes them
+   out). Methods (`c`): VFH (the default), potential field, DWA, each with its
+   own picture (`a`). Goal (`m`): clicked (you are the global planner) or a
+   carrot along an A* path on the map. A sensor **field of view** (`fov`)
+   and a **local map** (6 × 6 m, 0.1 m cells, moving with the robot), with
+   three keys as Patric asked: `l` on/off, `u` add hits only / also clear
+   along the rays, `f` forget (fade with half-life `forget`) on/off. Off,
+   the methods use only the latest scan.
 
 ## Decisions and preferences to keep (why the demos look the way they do)
 
 - **Start simple, let features be turned on.** Planning is off at the start
   in the grid demo (`p`), execution is off at the start in the planning demo
-  (`e`).
+  (`e`); new options are toggles or settings that default to off.
+- **One demo, one topic.** Obstacle avoidance got its own demo rather than
+  more rows in the planning demo.
 - **Cut what isn't about the demo's topic.** Removed along the way: the
   center-sampling cell rule, the changed-cells-vs-reference overlay (there
   is no privileged reference -- every pose is just another realisation), the
@@ -113,59 +93,65 @@ Check `git -C python_nav_demos status` when resuming anyway.
   it (so the perturbation can't open a crack). The cell lattice is anchored
   to the room as drawn, so moving the world really moves it across the cells.
 - **A map from sensor data has no model:** inflate in the grid (grid first),
-  keep the map proper and regenerate the inflated planning map from it
-  (never update an inflated map in place). The known map in the planning
-  demo is made from samples for that reason.
+  keep the map proper and regenerate the inflated planning map (and the cost
+  map) from it -- never update an inflated map in place. The known map in the
+  planning demo is made from samples for that reason.
+- **Noise as jitter, not drift** (Patric: drift would be too hard to handle).
+- **Smoothing is a setting, not a one-off action:** it has to apply to every
+  replan while driving, and can change mid-drive (it then smooths the rest of
+  the plan from the robot).
+- **People behave like people:** they wait for the robot and give way, or a
+  robot and a person in a doorway deadlock. Walking blindly is an option,
+  to show that reactive methods assume the world stands still.
 - **Single, unshifted keys that work on a Swedish Mac keyboard** (`,` `.` `k`
   `l` for rotation; brackets need Option there). The same key means the same
-  thing in both demos where possible.
-- **Discuss before coding** when Patric asks "thoughts?" or "what do you
-  mean"; he often refines the design in a few steps.
+  thing across demos where possible.
+- **Discuss before coding** when Patric asks "thoughts?", "what do you
+  mean" or "don't code yet"; he often refines the design in a few steps.
 - **Every number quoted in the README is measured** (usually headless, with
   `--set imperfect=0` for the worlds as drawn); re-measure after changes
   instead of trusting old numbers.
-- Planning worlds' comments and README claims were rechecked after the
-  switch to sample-based known maps; they hold.
 
 ## Next steps
 
-### Planning demo (where we are)
+### Obstacle avoidance
 
-From the list agreed when moving to the planning demo:
-1. **Start simple** -- done (execution toggle, legend shows only what is on
-   screen).
-2. **Trim the worlds to one lesson each** -- not done. Proposal: drop "thin
-   walls" (its lesson, walls vanishing between cell centres, is gone; the
-   grid demo covers thin walls), maybe fold "gap" into "rooms"; keep narrow
-   passage (grid closes the door; exact-geometry RRT gets through; rotation
-   closes it), bug trap (A* vs Dijkstra expansions), dead end (map as you
-   go), maze (long path; its narrow opening closes when rotated 15°), rooms,
-   clutter (RRT randomness).
-3. **Execution settings shown only when driving** -- done with `e`.
-4. **Corner cutting** as a third choice next to `n`'s 4/8 connectivity -- not
-   done; measured example in IDEAS.md (door world, 0.5 m cells, rotated
-   0–45°: closed at every angle without it, open at 68 % with it).
+- The local map is built (2026-09-27); a new world for the out-of-view case
+  only if the existing ones don't show it (Patric: "only if needed"). The
+  A* carrot keeps planning on the global map only (Patric: leave the local
+  map out of it).
+- The emergency stop (below) probably belongs in this demo.
+
+### Planning demo
+
+- **Trim the worlds to one lesson each** -- not done. Proposal: drop "thin
+  walls" (its lesson, walls vanishing between cell centres, is gone; the
+  grid demo covers thin walls), maybe fold "gap" into "rooms"; keep narrow
+  passage (grid closes the door; exact-geometry RRT gets through; rotation
+  closes it), bug trap (A* vs Dijkstra expansions), dead end (map as you
+  go), maze (long path; its narrow opening closes when rotated 15°), rooms,
+  clutter (RRT randomness, the one world the potential field gets through).
+- **Corner cutting** as a third choice next to `n`'s 4/8 connectivity -- not
+  done; measured example in IDEAS.md (door world, 0.5 m cells, rotated
+  0–45°: closed at every angle without it, open at 68 % with it).
+- Proposed, not decided: **slowing down in curves** (v² · curvature within a
+  sideways limit, using the spline's curvature) and **actuation noise**
+  (wheel slip; Patric: skip for now). The point of the latter would be that
+  feedback corrects actuation errors but not localization errors.
 
 ### The bigger ideas (details in IDEAS.md)
 
-In the order suggested, all waiting for a go-ahead and a design round:
-- **A local map for `run_avoid.py`, and maps that forget** (slides 35–38):
-  today each method sees only the latest scan (memoryless, 3 m range, so
-  e.g. what is behind the robot is forgotten at once). Next: a small rolling
-  grid round the robot (say 6 × 6 m) that accumulates scans, with the update
-  modes last scan only / accumulate / clear along rays / decay -- the office
-  already has the person in a doorway who leaves.
-- Done: reactive local planners (slides 26–33) as `run_avoid.py`: potential
-  field, DWA, VFH, with the A* carrot as the link to global planning.
-- Done: cost map for clearance (slides 13–15), localization jitter (slide 4
-  idea), spline smoothing (a simpler form of slides 16–22).
+All waiting for a go-ahead and a design round:
 - **Emergency stop and what comes after it** (slides 39–40): protective vs
   latched stop, speed-dependent safety field (v²/2a, the same as the braking
   profile), the recovery ladder, operator interventions as the metric, a
   "lecture mode" that freezes and asks the class what to do. Three open
-  questions are listed in IDEAS.md.
+  questions are listed in IDEAS.md. Probably belongs in `run_avoid.py`.
 - **Path smoothing by optimization** (slides 16–22) and **robot shape**
   (slide 10), lower priority.
+- Done: grid demo, cost map for clearance (slides 13–15), localization
+  jitter (slide 4 idea), spline smoothing, reactive local planners
+  (slides 26–33) as `run_avoid.py`.
 
 ## Practical notes
 
@@ -178,4 +164,6 @@ In the order suggested, all waiting for a go-ahead and a design round:
   folder wholesale: it can hold Patric's own screenshots.
 - The world files keep round, "as drawn" numbers; the demos perturb them.
   `worlds/*.json` are the planning worlds (keys 1–8), `worlds/grid/*.json`
-  the grid demo's own (keys 1–4, then the first planning worlds).
+  the grid demo's own (keys 1–4, then the first planning worlds),
+  `worlds/avoid/*.json` the avoidance demo's (keys 1–4; the planning format
+  plus `unmapped` and `movers`).

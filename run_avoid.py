@@ -26,6 +26,9 @@ def parse_args():
     ap.add_argument("--goal", choices=["clicked", "carrot"], default="clicked",
                     help="head straight for the goal, or for a carrot along an A* path")
     ap.add_argument("--no-people", action="store_true", help="start without the people")
+    ap.add_argument("--local-map", choices=["hits", "clear", "hits+forget", "clear+forget"],
+                    default=None, help="start with the local map on: add hits only, also "
+                                       "clear along rays, and/or forget")
     ap.add_argument("--blind", action="store_true",
                     help="people walk blindly instead of waiting for the robot")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
@@ -45,7 +48,10 @@ def main():
     rng = np.random.default_rng(args.seed)
     state = AvoidState(method=args.method.replace("-", " "),
                        goal_mode=GOAL_MODES[1] if args.goal == "carrot" else GOAL_MODES[0],
-                       polite=not args.blind, people_on=not args.no_people)
+                       polite=not args.blind, people_on=not args.no_people,
+                       local_map=args.local_map is not None,
+                       map_clear=bool(args.local_map and "clear" in args.local_map),
+                       map_forget=bool(args.local_map and "forget" in args.local_map))
     for item in args.set:
         name, _, raw = item.partition("=")
         if name not in TUNABLE_BY_NAME:
@@ -83,6 +89,8 @@ def main():
         unmapped = avoiddraw.UnmappedArtist(ax)
         people = avoiddraw.PeopleArtist(ax)
         method_art = avoiddraw.MethodArtist(ax)
+        local_art = avoiddraw.LocalMapArtist(ax)
+        fov_art = avoiddraw.FovArtist(ax)
         (plan_line,) = ax.plot([], [], color="C0", lw=2, alpha=0.7, zorder=4)
         (carrot,) = ax.plot([], [], "o", color="C0", ms=8, zorder=9)
         (scan_dots,) = ax.plot([], [], ".", color="r", ms=3, zorder=7)
@@ -197,6 +205,8 @@ def main():
         crash_text.set_position((sim.robot.x, sim.robot.y + 2.5 * ROBOT_RADIUS))
         crash_text.set_visible(sim.collided)
         method_art.set(sim, state.method, state.show_method)
+        local_art.set(sim.local, state.local_map)
+        fov_art.set(sim.robot.pose, cfg["fov"], cfg["sensor_range"])
         panel.update(state, sim, status)
         legend.update(state, sim)
         return []

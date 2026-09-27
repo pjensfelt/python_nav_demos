@@ -35,7 +35,8 @@ from .rasterize import inflate_cells
 
 
 class Lidar:
-    """A 2D range sensor: `n_rays` rays evenly spread over 360 degrees.
+    """A 2D range sensor: `n_rays` rays evenly spread over its field of
+    view (360 degrees by default, else centred on the heading).
 
     Rays are cast by sphere tracing on the world's distance field: from
     the current point along the ray, the nearest obstacle is
@@ -48,16 +49,20 @@ class Lidar:
     HIT_EPS = 1e-3     # closer than this to a surface counts as a hit
     MAX_STEPS = 100
 
-    def __init__(self, max_range=3.0, n_rays=180, noise=0.0, rng=None):
+    def __init__(self, max_range=3.0, n_rays=180, noise=0.0, rng=None, fov=2 * np.pi):
         self.max_range = max_range
         self.n_rays = n_rays
         self.noise = noise
+        self.fov = fov            # field of view [rad], centred on the heading
         self.rng = np.random.default_rng() if rng is None else rng
 
     def scan(self, world, x, y, a):
         """Returns (angles, ranges, hit): world-frame ray angles, measured
         ranges, and whether each ray hit something within range."""
-        ang = a + np.linspace(-np.pi, np.pi, self.n_rays, endpoint=False)
+        if self.fov >= 2 * np.pi - 1e-9:
+            ang = a + np.linspace(-np.pi, np.pi, self.n_rays, endpoint=False)
+        else:
+            ang = a + np.linspace(-self.fov / 2, self.fov / 2, self.n_rays)
         d = np.column_stack([np.cos(ang), np.sin(ang)])
         o = np.array([x, y])
         t = np.zeros(self.n_rays)

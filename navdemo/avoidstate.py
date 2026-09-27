@@ -35,6 +35,8 @@ _W = [0.0, 0.25, 0.5, 1.0, 2.0, 5.0]
 _VFH_WIN = [1.0, 1.5, 2.0, 3.0]
 _VFH_THR = [0.25, 0.5, 1.0, 2.0, 4.0]
 _TIME_SCALE = [0.25, 0.5, 1.0, 2.0, 4.0]
+_FOV = [60, 90, 180, 270, 360]
+_HALF_LIFE = [0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
 
 TUNABLES: List[Tunable] = [
     # the robot: the same limits whatever the method -- DWA plans with
@@ -46,6 +48,10 @@ TUNABLES: List[Tunable] = [
     # the sensor
     Tunable("sensor_range", "lidar_rng", _RANGE, _RANGE.index(3.0), "m"),
     CountTunable("rays", "rays", _RAYS, _RAYS.index(180)),
+    # the sensor's field of view, centred on the heading (360 = all round)
+    Tunable("fov", "fov", _deg(_FOV), _FOV.index(360), "deg"),
+    # the local map ('l'), when it forgets ('f'): the half-life of a cell
+    Tunable("half_life", "forget", _HALF_LIFE, _HALF_LIFE.index(5.0), "s"),
     # the world: how fast the people walk (0 = they stand still)
     Tunable("people", "people", _PEOPLE, _PEOPLE.index(1.0), "x"),
     # the A* carrot: how far ahead along the global path
@@ -83,6 +89,11 @@ class AvoidState:
     goal_mode: str = GOAL_MODES[0]
     polite: bool = True             # people wait for the robot (else they walk blindly)
     people_on: bool = True          # 'p': people in the world at all
+    # the local map: on/off ('l'), clear along rays or only add hits ('u'),
+    # forget (fade) or not ('f')
+    local_map: bool = False
+    map_clear: bool = False
+    map_forget: bool = False
 
     show_geometry: bool = True
     show_scan: bool = True
@@ -113,6 +124,8 @@ class AvoidState:
         self.idx[name] = int(np.argmin(np.abs(ladder - value)))
 
     def relevant(self, t):
+        if t.name == "half_life":
+            return self.local_map and self.map_forget
         if t.name == "carrot":
             return self.goal_mode == GOAL_MODES[1]
         return self.method in _ONLY_FOR.get(t.name, {self.method})
@@ -126,7 +139,8 @@ class AvoidState:
 
     def config(self):
         cfg = dict(FIXED, method=self.method, goal_mode=self.goal_mode, polite=self.polite,
-                   people_on=self.people_on)
+                   people_on=self.people_on, local_map=self.local_map,
+                   map_clear=self.map_clear, map_forget=self.map_forget)
         cfg.update({t.name: self.value(t.name) for t in TUNABLES})
         cfg["rays"] = int(cfg["rays"])
         return cfg
