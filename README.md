@@ -262,7 +262,15 @@ its current command**, `kappa = wRef / vRef` (green, dashed). The strip charts
 bottom left show `v`, `w` and the signed cross-track error `e` (positive =
 robot left of the path). They correspond to figure 3 of the MATLAB demo.
 
-### Two control laws (`c` toggles)
+### Three control laws (`c` cycles)
+
+**stop and turn**, the baseline that shows why the other two exist: follow
+the path exactly as it is, as straight lines between its corners. Turn on
+the spot to face the next corner, drive straight to it, braking so as to
+stop on it, turn, and so on (waypoints in a straight line are merged). It
+never leaves the path (within a centimetre), but it stops at every corner:
+on these hand-drawn paths that is 49 to 200 stops, and 48 to 144 s instead
+of about 10 s.
 
 **heading-P**, the MATLAB demo's controller (`calcCtrl` in `pure_pursuit.m`):
 
@@ -352,7 +360,7 @@ did. The robot restarts at its first point. `w` saves the current path to
 | `space` | pause / run | `tab` / `shift-tab` | select a parameter |
 | `r` | reset (restart the path) | `>` / `<` | raise / lower it |
 | `d` | disturb the robot | `g` | lookahead geometry on/off |
-| `c` | control law: heading-P / pure pursuit | `t` | driven trail on/off |
+| `c` | control law: heading-P / pure pursuit / stop and turn | `t` | driven trail on/off |
 | `b` | pure pursuit: turn in place when the target is behind | | |
 | `1`…`4` | built-in path | `S` | screenshot (2 PNGs, in `snapshots/`) |
 | `w` | save the path to `paths/` | `h` | key list |
@@ -473,12 +481,19 @@ Structure taken from the WASP assignment 3 planners
 completed. Their RRT* only rewired; here it also picks the best parent and
 passes cost changes on to descendants.
 
-### Execution
+### Execution (`e`, off at the start)
 
-The plan is driven with the same pure pursuit code as `run_pure_pursuit.py`
-(`navdemo/sim.py`, unchanged): `lookahd`, `v_max`, `kP` and `speed` are
-rows here, and `c` switches control law. The robot is checked against the
-real geometry every 20 ms, and stops, red, on contact.
+The demo starts with the planner only: no robot, and none of the execution
+settings. `e` turns execution on, so the lecture can first be about the
+plan and then about following it. The plan is then driven with the same
+code as `run_pure_pursuit.py` (`navdemo/sim.py`): `lookahd`, `v_max`, `kP`
+and `speed` become rows, and `c` cycles the control law, including **stop
+and turn**, which follows the planned path exactly and stops at every
+corner (the panel counts the stops). On an A\* path, with a corner at almost
+every cell, that roughly doubles the time: 34 s instead of 18 s in world 1.
+Shortcutting the path first (`s`) removes most of the corners (21 s). The
+robot is checked against the real geometry every 20 ms, and stops, red, on
+contact.
 
 ### Things to try
 
@@ -529,8 +544,9 @@ close it, and the robot takes the long way (18 m instead of 9 m).
 | left click | set the goal | `x` | RRT/RRT*: grid / exact geometry |
 | right click | set the start | `f` | RRT: stop at first path / all iterations |
 | `tab` / `shift-tab` | select a parameter | `s` | shortcut the path |
-| `>` / `<` | raise / lower it | `c` / `b` | control law / turn in place (pure pursuit) |
-| `g` / `o` / `e` | grid / real obstacles / search on/off | `a` / `t` | lookahead geometry / trail on/off |
+| `>` / `<` | raise / lower it | `e` | execution (a robot drives the plan) on / off |
+| `c` / `b` | control law / turn in place (pure pursuit) | `a` / `t` | lookahead geometry / trail on/off |
+| `g` / `o` / `y` | grid / real obstacles / search on/off | | |
 | `S` | screenshot | `h` / `q` | key list / quit |
 
 Rows that don't apply (for example RRT's `step` while A\* is selected, or the
@@ -551,7 +567,8 @@ marks the plan as stale until you press `enter`.
 `sample_sigma`, `min_hits`, `sensor_range`, `rays`,
 `noise`, `h_weight`, `iterations`, `step`, `goal_bias`, `radius`, `anim`,
 `lookahead`, `vmax`, `kp`, `time_scale`). Other options are `--rotate DEG`, `--exact`,
-`--law pure-pursuit`, `--no-turn-in-place`, `--snapshot FILE.png` and `--steps N`.
+`--execute` (start with execution on), `--law pure-pursuit|stop-and-turn`,
+`--no-turn-in-place`, `--snapshot FILE.png` and `--steps N`.
 
 ### Worlds
 

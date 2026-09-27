@@ -149,6 +149,23 @@ def test_turn_in_place_when_target_behind():
 
 
 @test
+def test_stop_and_turn_follows_the_path_exactly():
+    """Straight lines between the corners, a stop at each: on the
+    hand-drawn paths it stays within a centimetre, and stops all the time."""
+    from navdemo.sim import path_corners
+    state = DemoState()
+    state.law = "stop and turn"
+    p = state.controller_params()
+    path = builtin_paths()[3]
+    f = Follower(path, Robot(*path.start, 0.0))
+    while not (f.done and abs(f.robot.v) < 1e-3) and f.t < 200:
+        f.advance(0.1, p)
+    assert f.done and f.max_abs_e < 0.015
+    assert f.stops == len(path_corners(path.xy)) - 1
+    assert np.hypot(f.robot.x - path.xy[-1, 0], f.robot.y - path.xy[-1, 1]) < 0.03
+
+
+@test
 def test_ladders_and_set_value():
     s = DemoState()
     for t in TUNABLES:

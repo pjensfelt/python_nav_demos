@@ -26,13 +26,16 @@ def parse_args():
     ap.add_argument("--world", default="1", metavar="1..8|FILE.json",
                     help="built-in world 1..8 (worlds/*.json) or a world file")
     ap.add_argument("--planner", choices=PLANNERS, default="A*")
+    ap.add_argument("--execute", action="store_true",
+                    help="start with execution on: a robot that drives the plan ('e')")
+    ap.add_argument("--law", choices=["heading-P", "pure-pursuit", "stop-and-turn"],
+                    default="heading-P")
     ap.add_argument("--rotate", type=float, default=0.0, metavar="DEG",
                     help="rotate the world under the grid")
     ap.add_argument("--mapped", action="store_true",
                     help="start mapping as we go (lidar) instead of with the known map")
     ap.add_argument("--exact", action="store_true",
                     help="RRT/RRT*: check collisions against the exact geometry, not the grid")
-    ap.add_argument("--law", choices=["heading-P", "pure-pursuit"], default="heading-P")
     ap.add_argument("--no-turn-in-place", action="store_true",
                     help="pure pursuit law: don't turn on the spot when the target is behind")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
@@ -55,7 +58,8 @@ def main():
 
     state = PlanState(planner=args.planner, mapped=args.mapped, exact_geometry=args.exact,
                       turn_in_place=not args.no_turn_in_place,
-                      law={"heading-P": "heading-P", "pure-pursuit": "pure pursuit"}[args.law],
+                      law=args.law.replace("-", " ") if args.law != "heading-P" else args.law,
+                      execute=args.execute or args.headless or bool(args.snapshot),
                       world_angle=np.deg2rad(args.rotate))
     for item in args.set:
         name, _, raw = item.partition("=")
@@ -249,11 +253,11 @@ def main():
         elif mission.driving:
             status = "driving"
         elif mission.path and plan_key == state.plan_key():
-            status = "planned: space to drive"
+            status = "planned: space to drive" if state.execute else "planned (e to execute)"
         elif mission.path:
             status = "settings changed: enter to replan"
         else:
-            status = "enter to plan, space to go"
+            status = "enter to plan" + (", space to go" if state.execute else "")
 
         # ---- drawing ---------------------------------------------------
         grid_art.set(mission.grid, state.show_grid, faded=state.uses_exact_geometry)
@@ -279,13 +283,15 @@ def main():
             else:
                 ln.set_data([], [])
         trail.set_data(*zip(*mission.trail))
-        trail.set_visible(state.show_trail)
+        trail.set_visible(state.show_trail and state.execute)
         start_mark.set_data([mission.start[0]], [mission.start[1]])
         goal_mark.set_data([mission.goal[0]], [mission.goal[1]])
         robot.set_pose(*mission.robot.pose)
         for h in robot.artists:
             h.set_color("r" if mission.collided else "k")
-        if mission.follower is not None and state.show_lookahead and show_plan:
+            h.set_visible(state.execute)
+        if (mission.follower is not None and state.execute and state.show_lookahead
+                and show_plan and state.law != "stop and turn"):
             lookahead.set(mission.follower, cfg["lookahead"], True)
         else:
             lookahead.set(None, 0, False)

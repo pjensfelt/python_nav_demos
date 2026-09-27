@@ -309,6 +309,48 @@ def test_planning_keys_rotate_and_restore():
 
 
 @test
+def test_execution_toggle():
+    """Planning first: execution starts off, its rows are hidden and space
+    does nothing until 'e'."""
+    from types import SimpleNamespace as N
+    from navdemo import plankeys
+    from navdemo.planstate import TUNABLES
+    plankeys._MIN_REPEAT_INTERVAL = 0.0
+    s = PlanState()
+    h, r = plankeys.make_handler(s)
+
+    def press(k):
+        h(N(key=k))
+        r(N(key=k))
+
+    names = lambda: {TUNABLES[i].name for i in s.visible()}
+    assert not s.execute and "vmax" not in names()
+    press(" ")
+    assert not s.drive
+    press("e")
+    assert s.execute and "vmax" in names()
+    press(" ")
+    assert s.drive
+
+
+@test
+def test_stop_and_turn_is_exact_but_slow():
+    """Stop and turn follows the planned path exactly -- and stops at every
+    corner, which makes it much slower than pure pursuit; shortcutting the
+    path first removes most of the corners."""
+    w = World.load("1_gap.json")
+    times = {}
+    for law, sc in (("pure pursuit", False), ("stop and turn", False), ("stop and turn", True)):
+        m = _run(w, _cfg(law=law, shortcut=sc), t_max=200)
+        assert m.done and not m.collided, (law, sc)
+        times[(law, sc)] = m.t
+        if law == "stop and turn":
+            assert m.follower.stops > 0 and m.follower.max_abs_e < 0.05
+    assert times[("stop and turn", False)] > 1.5 * times[("pure pursuit", False)]
+    assert times[("stop and turn", True)] < times[("stop and turn", False)]
+
+
+@test
 def test_plan_keys():
     s = PlanState()
     k = s.plan_key()

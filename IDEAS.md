@@ -1,9 +1,11 @@
 # Ideas for more navigation demos
 
 Notes from going through `Lecture12_dd2410_Navigation.pdf` (66 slides) on
-2026-09-25. Nothing here is implemented yet. The focus of this part of the
-course is the **real-world aspects** of navigation: students have already
-seen RRT and friends in known worlds in the planning module.
+2026-09-25, and the design discussions since. Parts have been built since
+(the grid demo, and several planning-demo items, marked below); see
+**STATUS.md** for where things stand and what comes next. The focus of this
+part of the course is the **real-world aspects** of navigation: students
+have already seen RRT and friends in known worlds in the planning module.
 
 ## What the demos already cover
 
@@ -133,6 +135,20 @@ rotated under the axis-aligned grid (`,` `.` `k` `l`, `0` back). The
 map-as-you-go toggle moved from `k` to `m`, the lookahead display from `l`
 to `a`, so rotation uses the same keys in both demos. The grid demo now
 starts with grid-first inflation.
+
+Done 2026-09-26 (later): execution is off at the start (`e`): first the
+planner, then how to follow its path; the search display moved from `e` to
+`y`. A third control law, **stop and turn** (in both the planning and the
+pure pursuit demo): follow the path exactly, stopping at every corner to turn
+on the spot -- the baseline that shows why pure pursuit (or shortcutting)
+is needed.
+
+Still open for the planning demo:
+- **A legend that shows only what is on screen** (today it lists the RRT
+  tree, driven trail, earlier plans ... even when they aren't shown).
+- **Trim the worlds to one lesson each**: drop "thin walls" (its lesson is
+  gone; the grid demo covers thin walls), maybe fold "gap" into "rooms";
+  keep narrow passage, bug trap, dead end, maze, rooms, clutter.
 
 - **Corner cutting** as a third choice next to `n`'s 4 / 8 connectivity
   (moved here from the grid demo, which isn't about planning): let 8-connected

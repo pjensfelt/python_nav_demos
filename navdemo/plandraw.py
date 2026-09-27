@@ -256,9 +256,13 @@ class Panel:
         if state.planner != "A*":
             if state.planner == "RRT":
                 rows.append(f"         {'stop at 1st path' if state.stop_at_goal else 'all iterations'} (f)")
-        rows.append(f"shortcut: {'on' if state.shortcut else 'off'} (s)   law: {state.law} (c)")
-        if state.law == "pure pursuit":
-            rows.append(f"turn in place: {'on' if state.turn_in_place else 'off'} (b)")
+        rows.append(f"shortcut: {'on' if state.shortcut else 'off'} (s)")
+        if state.execute:
+            rows.append(f"execute: on (e), law: {state.law} (c)")
+            if state.law == "pure pursuit":
+                rows.append(f"         turn in place: {'on' if state.turn_in_place else 'off'} (b)")
+        else:
+            rows.append("execute: off (e)")
         rows += ["", "          VALUE", "          -----"]
         vis = state.visible()
         for i, t in enumerate(TUNABLES):
@@ -277,10 +281,13 @@ class Panel:
                     else f"{len(r.nodes)} nodes, {r.iterations} iter")
             plen = f"{r.cost:.2f} m" if r.path else "none"
             rows += [f"plan:   {plen}, {what}", f"        {1000 * r.seconds:.0f} ms"]
-        rows += [f"status: {status}",
-                 f"t = {mission.t:5.1f} s   driven = {mission.driven:5.1f} m",
-                 f"v = {mission.robot.v:+.2f} m/s  replans = {mission.replans}",
-                 "", "press 'h' for keys"]
+        rows += [f"status: {status}"]
+        if state.execute:
+            f = mission.follower
+            stops = f"  stops = {f.stops}" if (f is not None and state.law == "stop and turn") else ""
+            rows += [f"t = {mission.t:5.1f} s   driven = {mission.driven:5.1f} m",
+                     f"v = {mission.robot.v:+.2f} m/s  replans = {mission.replans}" + stops]
+        rows += ["", "press 'h' for keys"]
         self.text.set_text("\n".join(rows))
 
     @property

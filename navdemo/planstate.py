@@ -103,6 +103,9 @@ class PlanState:
 
     show_grid: bool = True
     show_geometry: bool = True
+    # Executing the plan (a robot that drives it) is off at the start: first
+    # the planner, then -- 'e' -- how to follow its path.
+    execute: bool = False
     show_search: bool = True
     show_lookahead: bool = True
     show_trail: bool = True
@@ -139,6 +142,10 @@ class PlanState:
         self.idx[name] = int(np.argmin(np.abs(ladder - value)))
 
     def relevant(self, t):
+        if t.name in ("lookahead", "vmax", "kp", "time_scale") and not self.execute:
+            return False
+        if t.name == "lookahead":
+            return self.law != "stop and turn"
         if t.name == "kp":
             return self.law == "heading-P"
         if t.name in ("sensor_range", "rays", "noise"):

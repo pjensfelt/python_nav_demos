@@ -19,19 +19,23 @@ _CONTINUOUS_KEYS = {">", "<", ",", ".", "k", "l"}
 _ROTATE = {",": -1, ".": 1, "k": -5, "l": 5}     # degrees, as in run_grid.py
 
 HELP = """
- mission                  map / world                 planner / display
- -------                  -----------                 -----------------
- enter  plan              m  known map / map as we go p  planner: A* / RRT / RRT*
- space  drive / pause     , / .  rotate the world 1°  n  A*: 4 / 8 connectivity
- r      reset             k / l  rotate it 5°         x  RRT: grid / exact geom.
- 1..8   world             0  unrotated, designed      f  RRT: stop at 1st path
- mouse  left: goal           start and goal           s  shortcut the path
-        right: start      v  another variant of the   g / o / e  grid / obstacles
-                             (imperfect) building        / search on/off
- c  control law           u  known map: fresh samples a / t  lookahead / trail
- b  pure pursuit: turn    d  known map: show samples  S  screenshot (2 pngs)
-    in place              tab / S-tab  select         h  this help
-                          > / <        change it      q  quit
+ planning                 map / world                 display
+ --------                 -----------                 -------
+ enter  plan              m  known map / map as we go g / o  grid / obstacles
+ p  planner: A*/RRT/RRT*  , / .  rotate the world 1°  y  search (A* cells, tree)
+ n  A*: 4 / 8 connected   k / l  rotate it 5°         S  screenshot (2 pngs)
+ x  RRT: grid / exact     0  unrotated, designed      h  this help
+ f  RRT: stop at 1st path    start and goal           q  quit
+ s  shortcut the path     v  another building variant
+ 1..8   world             u / d  known map: fresh
+ mouse  left: goal               samples / show them
+        right: start      tab / S-tab  select, > / <  change it
+
+ executing the path (e: on / off)
+ --------------------------------
+ space  drive / pause     c  control law: heading-P / pure pursuit / stop and turn
+ r      reset             b  pure pursuit: turn in place
+                          a / t  lookahead geometry / driven trail
 """
 
 
@@ -62,7 +66,10 @@ def make_handler(state: PlanState, fig=None, ax=None, demo="planning"):
         if k == "enter":
             state.plan = True
         elif k == " ":
-            state.drive = True
+            if state.execute:
+                state.drive = True
+            else:
+                print("execution is off: press e to follow the path with a robot")
         elif k == "r":
             state.reset = True
         elif k in "12345678":
@@ -109,6 +116,10 @@ def make_handler(state: PlanState, fig=None, ax=None, demo="planning"):
         elif k == "o":
             state.show_geometry = not state.show_geometry
         elif k == "e":
+            state.execute = not state.execute
+            if not state.execute:
+                state.drive = False
+        elif k == "y":
             state.show_search = not state.show_search
         elif k == "a":
             state.show_lookahead = not state.show_lookahead

@@ -119,7 +119,24 @@ def control_pure_pursuit(pose, target, vMax, sigma, turn_in_place=False):
     return vRef, wRef, alpha
 
 
-CONTROL_LAWS = ("heading-P", "pure pursuit")
+CONTROL_LAWS = ("heading-P", "pure pursuit", "stop and turn")
+
+# Stop and turn: the path followed exactly, as straight lines between its
+# corners, stopping at each one to turn on the spot. Waypoints where the
+# direction changes by less than this are not corners.
+CORNER_ANGLE = np.deg2rad(1.0)
+AT_CORNER = 0.02                  # m: close enough to a corner to stop and turn
+FACING = np.deg2rad(1.0)          # rad: close enough to the new direction to drive
+TURN_RATE = np.deg2rad(90)        # rad/s: top turning speed on the spot
+
+
+def path_corners(xy, angle=CORNER_ANGLE):
+    """Indices of the waypoints where the path turns (by more than `angle`),
+    plus the last one: where stop and turn has to stop."""
+    d = np.diff(xy, axis=0)
+    heading = np.arctan2(d[:, 1], d[:, 0])
+    turn = np.abs(wrap_angle(np.diff(heading)))
+    return [i + 1 for i in np.flatnonzero(turn > angle)] + [len(xy) - 1]
 
 
 class Follower:
@@ -153,6 +170,12 @@ class Follower:
         self._next_log = 0.0
         self.log_t, self.log_v, self.log_w, self.log_e = [], [], [], []
         self.trail = [(self.robot.x, self.robot.y)]
+        # stop and turn: the corners still to reach, and whether it is
+        # turning on the spot (else driving straight to the next corner)
+        self._corners = path_corners(self.path.xy)
+        self._corner = 0
+        self._turning = True
+        self.stops = 0
 
     def set_path(self, path):
         self.path = path
@@ -180,6 +203,9 @@ class Follower:
             self.vRef = self.wRef = 0.0
             return
 
+        if p["law"] == "stop and turn":
+            self.stop_and_turn(p)
+            return
         self.target = self.path.point_at(s + p["lookahead"])
         if p["law"] == "pure pursuit":
             self.vRef, self.wRef, self.aErr = control_pure_pursuit(
@@ -189,6 +215,53 @@ class Follower:
             self.vRef, self.wRef, self.aErr = control_heading(
                 self.robot.pose, self.target, p["vmax"], p["kp"], p["sigma"])
         self.brake_for_goal(p)
+
+    def stop_and_turn(self, p):
+        """Follow the path exactly as it is: turn on the spot to face the
+        next corner, drive straight to it, stop there, turn, and so on.
+
+        Nothing is cut and nothing is smoothed, so the robot never leaves
+        the path -- but it stops at every corner, and a path from a grid
+        planner has a corner at almost every cell. That is what pure pursuit
+        (or smoothing the path first) is for.
+        """
+        x, y, a = self.robot.pose
+        corner = self.path.xy[self._corners[self._corner]]
+        self.target = corner
+        dx, dy = corner[0] - x, corner[1] - y
+        dist = np.hypot(dx, dy)
+        a_brake = self.BRAKE_FRACTION * p["accv"]
+        w_brake = self.BRAKE_FRACTION * p["accw"]
+
+        if not self._turning and dist < AT_CORNER and abs(self.robot.v) < 0.05:
+            # arrived: on to the next corner, turning first
+            if self._corner == len(self._corners) - 1:
+                self.done, self.t_done = True, self.t     # the last corner is the goal
+                self.vRef = self.wRef = 0.0
+                return
+            self._corner += 1
+            self._turning = True
+            self.stops += 1
+            corner = self.path.xy[self._corners[self._corner]]
+            dx, dy = corner[0] - x, corner[1] - y
+            dist = np.hypot(dx, dy)
+
+        err = wrap_angle(np.arctan2(dy, dx) - a)
+        self.aErr = err
+        if self._turning:
+            if abs(err) < FACING and abs(self.robot.w) < np.deg2rad(5):
+                self._turning = False
+            else:
+                # on the spot, braking into the new heading
+                w = min(TURN_RATE, np.sqrt(2 * w_brake * abs(err)), 10 * abs(err))
+                self.vRef, self.wRef = 0.0, float(np.sign(err) * w)
+                return
+        # straight to the corner, braking so as to stop on it
+        v = p["vmax"]
+        if not np.isinf(p["accv"]):
+            v = min(v, np.sqrt(2 * a_brake * dist))
+        self.vRef = v
+        self.wRef = 2.0 * err          # a small correction to stay on the line
 
     # Braking deceleration as a fraction of acc_v: below the real limit, so
     # the robot has margin to actually follow the profile.
